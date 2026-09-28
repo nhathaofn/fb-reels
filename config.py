@@ -2,10 +2,12 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "browser_profile"
+PROFILES_DIR = PROFILE_DIR / "profiles"
 OUTPUT_DIR = BASE_DIR / "output"
 
 # Đảm bảo các thư mục tồn tại
 PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_MAX_REELS = 20

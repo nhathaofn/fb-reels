@@ -1,13 +1,15 @@
+import json
 import logging
 import random
 import re
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from playwright.sync_api import sync_playwright
 
 from article_extractor import extract_article
-from config import MAX_DELAY, MIN_DELAY, PROFILE_DIR, USER_AGENT
+from config import MAX_DELAY, MIN_DELAY, PROFILE_DIR, PROFILES_DIR, USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -88,30 +90,154 @@ def extract_urls_from_text(text: str) -> list[str]:
     return external_urls
 
 
-def has_logged_in_session() -> bool:
-    """Kiểm tra xem thư mục profile đã có dữ liệu phiên đăng nhập chưa."""
-    if not PROFILE_DIR.exists():
+def get_profile_dir(profile_name: str = "default") -> Path:
+    """Trả về đường dẫn thư mục profile tương ứng."""
+    clean_name = (profile_name or "").strip()
+    if not clean_name or clean_name.lower() == "default":
+        return PROFILE_DIR
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', clean_name)
+    target = PROFILES_DIR / safe_name
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def list_available_profiles() -> list[str]:
+    """Liệt kê danh sách tất cả profile có sẵn."""
+    profiles = ["default"]
+    if PROFILES_DIR.exists():
+        for item in sorted(PROFILES_DIR.iterdir()):
+            if item.is_dir() and item.name not in profiles:
+                profiles.append(item.name)
+    return profiles
+
+
+def delete_profile(profile_name: str) -> bool:
+    """Xóa một profile."""
+    if not profile_name or profile_name.lower() == "default":
+        for item in PROFILE_DIR.iterdir():
+            if item.name not in ["profiles", ".gitkeep"]:
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                except Exception:
+                    pass
+        return True
+    
+    p_dir = get_profile_dir(profile_name)
+    if p_dir.exists() and p_dir != PROFILE_DIR:
+        shutil.rmtree(p_dir, ignore_errors=True)
+        return True
+    return False
+
+
+def parse_cookie_input(cookie_input: str) -> list[dict]:
+    """Phân tích cookie dạng JSON (từ Cookie-Editor) hoặc chuỗi key=val; ... thành định dạng Playwright."""
+    clean_str = cookie_input.strip()
+    if not clean_str:
+        return []
+    
+    cookies = []
+    # 1. Thử parse dạng JSON
+    if clean_str.startswith("[") or clean_str.startswith("{"):
+        try:
+            data = json.loads(clean_str)
+            if isinstance(data, dict):
+                data = [data]
+            for item in data:
+                if isinstance(item, dict) and "name" in item and "value" in item:
+                    cookie = {
+                        "name": str(item["name"]),
+                        "value": str(item["value"]),
+                        "domain": str(item.get("domain") or ".facebook.com"),
+                        "path": str(item.get("path") or "/")
+                    }
+                    if "secure" in item:
+                        cookie["secure"] = bool(item["secure"])
+                    if "httpOnly" in item:
+                        cookie["httpOnly"] = bool(item["httpOnly"])
+                    if "sameSite" in item and item["sameSite"]:
+                        ss = str(item["sameSite"]).capitalize()
+                        if ss in ["Strict", "Lax", "None"]:
+                            cookie["sameSite"] = ss
+                    cookies.append(cookie)
+            if cookies:
+                return cookies
+        except Exception as e:
+            logger.debug(f"Không phải JSON cookie hoặc parse lỗi: {e}")
+
+    # 2. Thử parse dạng chuỗi c_user=...; xs=...
+    for part in clean_str.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, v = part.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if k and v:
+                cookies.append({
+                    "name": k,
+                    "value": v,
+                    "domain": ".facebook.com",
+                    "path": "/"
+                })
+    return cookies
+
+
+def save_cookies_to_profile(profile_name: str, cookie_input: str) -> tuple[bool, str]:
+    """Nạp cookies vào profile cụ thể."""
+    cookies = parse_cookie_input(cookie_input)
+    if not cookies:
+        return False, "Không tìm thấy cookie hợp lệ. Vui lòng kiểm tra lại định dạng JSON hoặc chuỗi c_user=...; xs=..."
+
+    p_dir = get_profile_dir(profile_name)
+    try:
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(p_dir),
+                headless=True,
+                user_agent=USER_AGENT,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
+            context.add_cookies(cookies)
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            context.close()
+        return True, f"Đã lưu thành công {len(cookies)} cookies vào Profile '{profile_name}'!"
+    except Exception as e:
+        logger.error(f"Lỗi khi lưu cookies vào profile {profile_name}: {e}")
+        return False, f"Lỗi khi lưu cookies: {e}"
+
+
+def has_logged_in_session(profile_name: str = "default") -> bool:
+    """Kiểm tra xem thư mục profile chỉ định đã có dữ liệu phiên đăng nhập chưa."""
+    p_dir = get_profile_dir(profile_name)
+    if not p_dir.exists():
         return False
 
-    cookies_path = PROFILE_DIR / "Default" / "Network" / "Cookies"
-    local_storage = PROFILE_DIR / "Default" / "Local Storage"
+    cookies_path = p_dir / "Default" / "Network" / "Cookies"
+    local_storage = p_dir / "Default" / "Local Storage"
 
     if cookies_path.exists() or local_storage.exists():
         return True
 
-    # Kiểm tra xem có file nào khác ngoài .gitkeep không
+    # Kiểm tra xem có file nào khác ngoài .gitkeep và thư mục profiles không
     try:
-        entries = [f for f in PROFILE_DIR.iterdir() if f.name != ".gitkeep"]
+        entries = [f for f in p_dir.iterdir() if f.name not in [".gitkeep", "profiles"]]
         return len(entries) > 0
     except Exception:
         return False
 
 
-def launch_login_browser(headless: bool = False) -> None:
-    """Mở trình duyệt thực để người dùng đăng nhập tài khoản Facebook."""
+def launch_login_browser(profile_name: str = "default", headless: bool = False) -> None:
+    """Mở trình duyệt thực để người dùng đăng nhập tài khoản Facebook vào profile tương ứng."""
+    p_dir = get_profile_dir(profile_name)
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
+            user_data_dir=str(p_dir),
             headless=headless,
             user_agent=USER_AGENT,
             viewport={"width": 1280, "height": 800},
@@ -267,13 +393,15 @@ def run_crawler_pipeline(
     delay_range: tuple = (MIN_DELAY, MAX_DELAY),
     headless: bool = True,
     progress_callback = None,
-    stop_check_callback = None
+    stop_check_callback = None,
+    profile_name: str = "default"
 ) -> list[dict]:
     """Hàm pipeline chạy toàn bộ luồng cào dữ liệu Facebook Reels."""
     results = []
+    p_dir = get_profile_dir(profile_name)
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR),
+            user_data_dir=str(p_dir),
             headless=headless,
             user_agent=USER_AGENT,
             viewport={"width": 1280, "height": 800},
@@ -350,7 +478,8 @@ def crawl_reels(
     delay_range: tuple = (MIN_DELAY, MAX_DELAY),
     headless: bool = True,
     progress_callback = None,
-    stop_check_callback = None
+    stop_check_callback = None,
+    profile_name: str = "default"
 ) -> list[dict]:
     """Hàm wrapper tiện ích cào reels nhận target là URL fanpage hoặc danh sách URL reels."""
     if isinstance(input_target, list):
@@ -368,5 +497,6 @@ def crawl_reels(
         delay_range=delay_range,
         headless=headless,
         progress_callback=progress_callback,
-        stop_check_callback=stop_check_callback
+        stop_check_callback=stop_check_callback,
+        profile_name=profile_name
     )

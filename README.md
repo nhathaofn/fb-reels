@@ -57,35 +57,57 @@ pip install -r requirements.txt && playwright install chromium
 
 ---
 
-## 🚀 Cách Mở & Khởi Chạy Tool
+## 🚀 Cách Mở & Khởi Chạy Tool (Máy Chủ & Mạng LAN)
 
-Bạn có thể khởi động công cụ bằng một trong hai cách đơn giản sau:
+Bạn có thể khởi động công cụ bằng một trong hai cách đơn giản sau trên máy chủ (Host):
 
 ### Cách 1: Sử dụng file chạy nhanh (Dành cho Windows - Khuyên dùng)
 - Click đúp chuột vào file **`run.bat`** tại thư mục gốc của dự án.
-- Cửa sổ Console sẽ tự động khởi tạo môi trường và mở ứng dụng Web trên trình duyệt mặc định của bạn.
+- Cửa sổ Console sẽ tự động khởi tạo môi trường và mở ứng dụng Web trên cổng `8501`.
+- Giao diện sẽ thông báo rõ:
+  - Địa chỉ truy cập tại máy chủ: `http://localhost:8501`
+  - Địa chỉ truy cập từ các máy khác trong mạng LAN: `http://<IP_MAY_CHU>:8501` (ví dụ: `http://192.168.1.27:8501`).
 
 ### Cách 2: Khởi chạy bằng lệnh qua Terminal / PowerShell
 Chạy dòng lệnh sau:
 ```bash
-streamlit run app.py
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
-Giao diện Web sẽ tự động mở tại địa chỉ: `http://localhost:8501`.
 
 ---
 
-## 🔐 Hướng Dẫn Đăng Nhập Facebook An Toàn (Chỉ Làm 1 Lần)
+## 🌐 Hướng Dẫn Sử Dụng Trong Mạng LAN & Quản Lý Đa Profile (Multi-Profile)
 
-Để cào được video Reels từ Facebook mà không bị giới hạn hoặc yêu cầu đăng nhập liên tục:
+Tool hỗ trợ mô hình **1 Máy chủ chạy Tool - Nhiều máy trạm (Client) cùng sử dụng qua mạng LAN**, trong đó mỗi máy/người dùng sử dụng một **Profile Facebook hoàn toàn độc lập**, không dùng chung tài khoản với máy chủ.
 
-1. Mở giao diện ứng dụng Streamlit trên trình duyệt.
-2. Quan sát mục **Tài khoản Facebook** ở thanh Sidebar bên trái:
-   - Nếu hiển thị `🟡 Chưa đăng nhập`, bấm vào nút **"🔐 Mở trình duyệt đăng nhập Facebook"**.
-3. Một cửa sổ trình duyệt Chromium sẽ tự động bật lên và điều hướng tới trang đăng nhập Facebook.
-4. Bạn tiến hành đăng nhập tài khoản Facebook bình thường (nhập mã 2FA / OTP nếu có).
-5. Sau khi đăng nhập thành công và nhìn thấy trang chủ Facebook (Newsfeed), bạn có thể đóng cửa sổ trình duyệt đó lại.
-6. Quay lại giao diện Web Tool và bấm nút **"🔄 Tôi đã đăng nhập xong"** (hoặc tải lại trang).
-7. Trạng thái sẽ chuyển thành `🟢 Đã có phiên đăng nhập`. Toàn bộ cookie và phiên làm việc sẽ được lưu trữ an toàn trong thư mục `browser_profile/` trên máy của bạn. Ở các lần sử dụng tiếp theo, bạn **không cần phải đăng nhập lại**.
+### 1. Truy cập từ máy trạm trong mạng LAN
+- Đảm bảo máy trạm kết nối cùng mạng Wi-Fi hoặc mạng LAN với máy chủ.
+- Trên trình duyệt máy trạm (Chrome, Edge, Cốc Cốc...), truy cập địa chỉ: `http://<IP_MAY_CHU>:8501` (ví dụ: `http://192.168.1.27:8501`).
+- *Lưu ý*: Nếu máy trạm không mở được, hãy kiểm tra Firewall trên máy chủ Windows để mở cổng 8501 (xem mục FAQ bên dưới).
+
+### 2. Tạo Profile riêng cho máy của bạn
+- Tại thanh Sidebar bên trái, bấm vào mục **"Tạo Profile mới"**.
+- Nhập tên đại diện cho bạn hoặc máy của bạn (ví dụ: `may_nam`, `user_linh`, `pc_02`...) rồi bấm **"Tạo Profile"**.
+- Chọn Profile vừa tạo trong danh sách chọn Profile.
+
+### 3. Đăng nhập Facebook cho Profile (Chỉ làm 1 lần duy nhất)
+
+Có 2 cách đăng nhập:
+
+#### Cách A: Nhập Cookie trực tiếp từ trình duyệt của bạn (Dành cho máy trạm LAN - Tiện lợi nhất)
+Vì Playwright chạy trên máy chủ nên máy trạm trong mạng LAN không thể nhìn thấy cửa sổ trình duyệt pop-up của máy chủ. Cách nhanh nhất và an toàn nhất là xuất Cookie từ trình duyệt của bạn:
+1. Trên trình duyệt của bạn (máy cá nhân), đăng nhập tài khoản Facebook bình thường.
+2. Cài đặt tiện ích mở rộng miễn phí **[Cookie-Editor](https://cookie-editor.com/)** (hoặc J2TEAM Cookies) trên Chrome/Edge.
+3. Khi đang ở trang Facebook, bấm vào icon Cookie-Editor -> bấm **Export** -> chọn **Export as JSON** (hoặc copy giá trị `c_user=...; xs=...`).
+4. Quay lại trang Tool Web, mở mục **"📥 Nhập Cookie trực tiếp cho Profile"**.
+5. Dán đoạn Cookie vừa copy vào ô văn bản và bấm **"Lưu Cookie vào Profile"**.
+6. Hệ thống sẽ lưu phiên vĩnh viễn vào thư mục riêng `browser_profile/profiles/<profile_name>/`. Trạng thái chuyển thành `🟢 Đã có phiên đăng nhập`. Từ các lần cào sau, bạn **không bao giờ phải nhập lại**.
+
+#### Cách B: Mở trình duyệt đăng nhập tương tác (Dành cho người ngồi trực tiếp tại máy chủ)
+1. Chọn Profile cần đăng nhập (ví dụ: `default`).
+2. Bấm nút **"🔐 Mở trình duyệt đăng nhập Facebook"**.
+3. Cửa sổ Chromium bật lên trên màn hình máy chủ, đăng nhập tài khoản Facebook bình thường (hỗ trợ cả 2FA).
+4. Đăng nhập xong, đóng trình duyệt lại và bấm **"🔄 Tôi đã đăng nhập xong"**.
 
 ---
 
@@ -158,6 +180,7 @@ Tool_/get_content/
 ├── run.bat                  # Script khởi động nhanh 1-click cho người dùng Windows
 ├── README.md                # Tài liệu hướng dẫn sử dụng chi tiết (tiếng Việt)
 ├── browser_profile/         # Thư mục lưu trữ phiên đăng nhập Facebook cục bộ (Playwright)
+│   └── profiles/            # Thư mục chứa từng profile riêng cho từng máy con trong mạng LAN
 ├── output/                  # Thư mục chứa các file Excel kết quả tự động xuất ra
 └── tests/                   # Bộ test suite kiểm thử tự động toàn diện (pytest)
     ├── test_app.py
@@ -178,25 +201,33 @@ Dự án tuân thủ phương pháp phát triển kiểm thử nghiêm ngặt (T
 pytest tests/ -v
 ```
 
-Kết quả mong đợi: **54/54 test cases vượt qua (100% Passed)**.
+Kết quả: **59/59 test cases vượt qua (100% Passed)**.
 
 ---
 
 ## 💡 Câu Hỏi Thường Gặp & Xử Lý Sự Cố (FAQ & Troubleshooting)
 
-### 1. Báo lỗi `Executable doesn't exist at ... chromium` khi bấm cào?
+### 1. Máy trạm trong mạng LAN không vào được Web qua `http://<IP_MAY_CHU>:8501`?
+- **Nguyên nhân**: Tường lửa Windows (Windows Defender Firewall) trên máy chủ đang chặn cổng kết nối đến 8501.
+- **Cách khắc phục**: Mở PowerShell với quyền Administrator trên máy chủ và chạy câu lệnh sau để mở cổng:
+  ```powershell
+  New-NetFirewallRule -DisplayName "Streamlit LAN Port 8501" -Direction Inbound -LocalPort 8501 -Protocol TCP -Action Allow
+  ```
+- Hoặc vào **Windows Defender Firewall** -> **Advanced Settings** -> **Inbound Rules** -> **New Rule** -> Chọn **Port** -> **TCP 8501** -> **Allow the connection**.
+
+### 2. Báo lỗi `Executable doesn't exist at ... chromium` khi bấm cào?
 - **Nguyên nhân**: Bạn chưa tải trình duyệt Chromium cho Playwright.
 - **Cách khắc phục**: Chạy lệnh `playwright install chromium` trong Terminal hoặc Command Prompt rồi khởi động lại tool.
 
-### 2. Làm thế nào để đổi sang tài khoản Facebook khác?
-- **Cách 1**: Bấm nút **"🔐 Mở trình duyệt đăng nhập Facebook"** trên Sidebar, trình duyệt mở ra bạn bấm Đăng xuất tài khoản cũ và đăng nhập tài khoản mới.
-- **Cách 2**: Xóa toàn bộ nội dung bên trong thư mục `browser_profile/` rồi thực hiện lại bước đăng nhập Facebook.
+### 3. Làm thế nào để đổi sang tài khoản Facebook khác hoặc xóa Profile?
+- **Cách 1**: Trên Sidebar, chọn Profile tương ứng rồi bấm **"🗑️ Xóa Profile"** hoặc bấm **"🔐 Mở trình duyệt đăng nhập Facebook"** để đăng xuất và đăng nhập lại.
+- **Cách 2**: Nhập Cookie mới vào ô **"📥 Nhập Cookie trực tiếp cho Profile"** và bấm lưu để ghi đè.
 
-### 3. Một số bài viết không lấy được nội dung (Nội dung rỗng hoặc ghi lỗi)?
+### 4. Một số bài viết không lấy được nội dung (Nội dung rỗng hoặc ghi lỗi)?
 - **Nguyên nhân**: Một số trang web báo chí/blog kích hoạt tường lửa chống bot (Cloudflare Turnstile, Cloudflare WAF) hoặc yêu cầu trả phí đọc báo (Paywall).
 - **Xử lý**: Tool tự động ghi nhận trạng thái vào cột **Trạng thái** trong file Excel để người dùng dễ dàng lọc và kiểm tra thủ công.
 
-### 4. Bị lỗi hiển thị tiếng Việt khi mở file CSV trong Excel?
+### 5. Bị lỗi hiển thị tiếng Việt khi mở file CSV trong Excel?
 - Nút tải file CSV của tool đã được cấu hình bảng mã `utf-8-sig` (chứa ký tự Byte Order Mark) đặc trị lỗi hiển thị tiếng Việt trên Microsoft Excel. Tuy nhiên, khuyên dùng file **.xlsx** để có trải nghiệm hiển thị và định dạng cột đẹp nhất.
 
 ---

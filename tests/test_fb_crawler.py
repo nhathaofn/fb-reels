@@ -14,6 +14,11 @@ from fb_crawler import (
     extract_single_reel,
     run_crawler_pipeline,
     crawl_reels,
+    get_profile_dir,
+    list_available_profiles,
+    delete_profile,
+    parse_cookie_input,
+    save_cookies_to_profile,
 )
 
 
@@ -373,4 +378,129 @@ def test_run_crawler_pipeline_stop_check_callback():
         assert len(results) == 1
         assert results[0]["reel_url"] == "https://www.facebook.com/reel/111"
         assert mock_extract.call_count == 1
+
+
+def test_get_profile_dir(tmp_path, monkeypatch):
+    """Kiểm tra trả về đúng thư mục profile."""
+    mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
+    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+
+    # default
+    assert get_profile_dir("default") == mock_base
+    assert get_profile_dir("") == mock_base
+    assert get_profile_dir("   ") == mock_base
+
+    # custom profile name
+    p1 = get_profile_dir("user_a")
+    assert p1 == mock_sub / "user_a"
+    assert p1.exists()
+
+    # sanitize special chars
+    p2 = get_profile_dir("user #1 / test!")
+    assert p2 == mock_sub / "user__1___test_"
+    assert p2.exists()
+
+
+def test_list_available_profiles(tmp_path, monkeypatch):
+    """Kiểm tra liệt kê các profile có sẵn."""
+    mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+
+    # Khi thư mục profiles chưa có
+    assert list_available_profiles() == ["default"]
+
+    # Khi tạo một số profile con
+    mock_sub.mkdir(parents=True)
+    (mock_sub / "may_1").mkdir()
+    (mock_sub / "may_2").mkdir()
+    (mock_sub / "some_file.txt").write_text("hello")
+
+    profiles = list_available_profiles()
+    assert profiles == ["default", "may_1", "may_2"]
+
+
+def test_delete_profile(tmp_path, monkeypatch):
+    """Kiểm tra xóa profile."""
+    mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
+    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+
+    # Tạo profile con may_1
+    p1 = mock_sub / "may_1"
+    p1.mkdir(parents=True)
+    (p1 / "test.txt").write_text("data")
+    assert p1.exists()
+
+    res = delete_profile("may_1")
+    assert res is True
+    assert not p1.exists()
+
+    # Xóa default (chỉ xóa nội dung bên trong trừ profiles & .gitkeep)
+    mock_base.mkdir(parents=True, exist_ok=True)
+    (mock_base / "dummy.txt").write_text("data")
+    res_default = delete_profile("default")
+    assert res_default is True
+    assert not (mock_base / "dummy.txt").exists()
+
+
+def test_parse_cookie_input():
+    """Kiểm tra parse cookie JSON và chuỗi key=val."""
+    # 1. Rỗng hoặc khoảng trắng
+    assert parse_cookie_input("") == []
+    assert parse_cookie_input("   ") == []
+
+    # 2. JSON array từ Cookie-Editor
+    json_str = """[
+        {"name": "c_user", "value": "1000123456", "domain": ".facebook.com", "path": "/", "secure": true, "sameSite": "no_restriction"},
+        {"name": "xs", "value": "abcdef%3A123", "domain": ".facebook.com", "path": "/", "httpOnly": true}
+    ]"""
+    cookies_json = parse_cookie_input(json_str)
+    assert len(cookies_json) == 2
+    assert cookies_json[0]["name"] == "c_user"
+    assert cookies_json[0]["value"] == "1000123456"
+    assert cookies_json[0]["domain"] == ".facebook.com"
+    assert cookies_json[0]["secure"] is True
+    assert cookies_json[0].get("sameSite") == "None" or cookies_json[0].get("sameSite") is None
+    assert cookies_json[1]["name"] == "xs"
+    assert cookies_json[1]["httpOnly"] is True
+
+    # 3. Chuỗi c_user=...; xs=...
+    raw_str = "c_user=1000999; xs=3456%3A9; fr=0xyz123;"
+    cookies_raw = parse_cookie_input(raw_str)
+    assert len(cookies_raw) == 3
+    assert cookies_raw[0]["name"] == "c_user"
+    assert cookies_raw[0]["value"] == "1000999"
+    assert cookies_raw[0]["domain"] == ".facebook.com"
+    assert cookies_raw[1]["name"] == "xs"
+    assert cookies_raw[1]["value"] == "3456%3A9"
+
+
+def test_save_cookies_to_profile(tmp_path, monkeypatch):
+    """Kiểm tra lưu cookie vào profile."""
+    mock_base = tmp_path / "browser_profile"
+    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+
+    # 1. Cookie không hợp lệ
+    success, msg = save_cookies_to_profile("default", "invalid_text")
+    assert success is False
+    assert "Không tìm thấy cookie hợp lệ" in msg
+
+    # 2. Mock Playwright lưu thành công
+    with patch("fb_crawler.sync_playwright") as mock_pw:
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_pw.return_value.__enter__.return_value.chromium.launch_persistent_context.return_value = mock_context
+
+        valid_input = "c_user=10001; xs=sec_tok;"
+        success, msg = save_cookies_to_profile("user_b", valid_input)
+        assert success is True
+        assert "Đã lưu thành công 2 cookies" in msg
+        mock_context.add_cookies.assert_called_once()
+        assert len(mock_context.add_cookies.call_args[0][0]) == 2
+
 

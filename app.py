@@ -1,10 +1,19 @@
+import time
 from datetime import datetime
 import pandas as pd
 import streamlit as st
 
 from config import DEFAULT_MAX_REELS, MAX_DELAY, MIN_DELAY, OUTPUT_DIR
 from exporter import COLUMNS_MAP, export_to_excel, get_excel_bytes
-from fb_crawler import has_logged_in_session, launch_login_browser, run_crawler_pipeline
+from fb_crawler import (
+    delete_profile,
+    get_profile_dir,
+    has_logged_in_session,
+    launch_login_browser,
+    list_available_profiles,
+    run_crawler_pipeline,
+    save_cookies_to_profile,
+)
 
 
 def build_display_dataframe(records: list[dict]) -> pd.DataFrame:
@@ -79,20 +88,73 @@ def make_progress_callback(
 
 
 def render_sidebar():
-    """Hiển thị sidebar cấu hình và trạng thái tài khoản Facebook."""
+    """Hiển thị sidebar cấu hình và quản lý đa profile tài khoản Facebook."""
     with st.sidebar:
-        st.header("🔐 Trạng thái tài khoản")
-        is_logged_in = has_logged_in_session()
-        if is_logged_in:
-            st.success("🟢 Đã có phiên đăng nhập")
-        else:
-            st.warning("🟡 Chưa đăng nhập")
-            st.caption("Khuyên dùng: Đăng nhập trước khi cào để hạn chế checkpoint và tránh bị Facebook chặn.")
+        st.header("👤 Tài khoản Facebook")
 
-        if st.button("🔐 Mở trình duyệt đăng nhập Facebook", use_container_width=True):
-            st.info("Đang mở trình duyệt Chromium... Vui lòng đăng nhập Facebook rồi đóng cửa sổ trình duyệt.")
-            launch_login_browser(headless=False)
-            st.rerun()
+        # Danh sách profile
+        available_profiles = list_available_profiles()
+        selected_profile = st.selectbox(
+            "Chọn Profile:",
+            options=available_profiles,
+            index=0,
+            help="Mỗi máy tính hoặc người dùng trong mạng LAN có thể chọn hoặc tạo một Profile riêng."
+        )
+
+        is_logged_in = has_logged_in_session(selected_profile)
+        if is_logged_in:
+            st.success(f"🟢 Đã đăng nhập ({selected_profile})")
+            if st.button(f"🗑️ Xóa phiên profile '{selected_profile}'", use_container_width=True):
+                delete_profile(selected_profile)
+                st.info(f"Đã xóa dữ liệu phiên của profile '{selected_profile}'.")
+                st.rerun()
+        else:
+            st.warning(f"🟡 Chưa đăng nhập ({selected_profile})")
+            st.caption("Nạp Cookie hoặc đăng nhập để cào video mà không bị giới hạn.")
+
+        # Tab hoặc Expander nạp cookie cho máy LAN
+        with st.expander("🔑 Nạp Cookie (Khuyên dùng cho máy LAN)", expanded=not is_logged_in):
+            st.markdown(
+                "Copy Cookie từ tiện ích **Cookie-Editor** (dạng JSON) hoặc chuỗi `c_user=...; xs=...` trên máy bạn rồi dán vào đây:"
+            )
+            cookie_text = st.text_area(
+                "Dán Cookie vào đây:",
+                height=90,
+                key=f"cookie_input_{selected_profile}",
+                placeholder="[{\"name\": \"c_user\", ...}] hoặc c_user=12345; xs=abcdef..."
+            )
+            if st.button("💾 Lưu Cookie vào Profile", use_container_width=True, key=f"btn_save_cookie_{selected_profile}"):
+                if cookie_text.strip():
+                    with st.spinner("Đang kiểm tra và lưu cookie..."):
+                        ok, msg = save_cookies_to_profile(selected_profile, cookie_text)
+                    if ok:
+                        st.success(msg)
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                else:
+                    st.warning("Vui lòng dán cookie vào ô trên.")
+
+        # Nút mở trình duyệt (dành cho người ngồi tại máy chủ)
+        with st.expander("🖥️ Mở trình duyệt (Chỉ khi ngồi tại máy chủ)"):
+            st.caption("Cửa sổ Chrome sẽ hiện trực tiếp trên màn hình máy chủ Windows.")
+            if st.button("Mở trình duyệt đăng nhập", use_container_width=True, key=f"btn_launch_{selected_profile}"):
+                st.info("Đang mở trình duyệt... Hãy đăng nhập rồi đóng cửa sổ.")
+                launch_login_browser(selected_profile, headless=False)
+                st.rerun()
+
+        # Tạo Profile mới
+        with st.expander("➕ Thêm Profile mới"):
+            new_name = st.text_input("Tên Profile mới:", key="new_profile_input_field", placeholder="Ví dụ: May_2, Hao...")
+            if st.button("Tạo Profile mới", use_container_width=True, key="btn_create_profile"):
+                if new_name.strip():
+                    get_profile_dir(new_name.strip())
+                    st.success(f"Đã tạo profile '{new_name.strip()}'!")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.warning("Vui lòng nhập tên profile.")
 
         st.markdown("---")
         st.header("⚙️ Cấu hình cào")
@@ -126,7 +188,7 @@ def render_sidebar():
         st.markdown("---")
         st.caption(f"📁 Dữ liệu xuất tự động lưu vào: `{OUTPUT_DIR}`")
 
-        return int(max_reels), delay_range, check_comments, headless
+        return selected_profile, int(max_reels), delay_range, check_comments, headless
 
 
 def main():
@@ -152,7 +214,7 @@ def main():
     if "stop_crawling" not in st.session_state:
         st.session_state["stop_crawling"] = False
 
-    max_reels, delay_range, check_comments, headless = render_sidebar()
+    selected_profile, max_reels, delay_range, check_comments, headless = render_sidebar()
 
     # Main content tabs
     tab1, tab2 = st.tabs(["🏢 Cào theo Fanpage / Profile", "🔗 Cào theo danh sách Reels lẻ"])
@@ -253,7 +315,8 @@ def main():
                     delay_range=delay_range,
                     headless=headless,
                     progress_callback=callback,
-                    stop_check_callback=should_stop_crawl
+                    stop_check_callback=should_stop_crawl,
+                    profile_name=selected_profile
                 )
 
                 was_stopped = should_stop_crawl()

@@ -198,14 +198,16 @@ def test_make_progress_callback_none_handles_safely():
 def test_render_sidebar_logged_in(mock_st, mock_has_session):
     """Kiểm tra render sidebar khi đã có phiên đăng nhập."""
     mock_has_session.return_value = True
+    mock_st.selectbox.return_value = "default"
     mock_st.number_input.return_value = 25
     mock_st.slider.return_value = (2.0, 5.0)
     mock_st.checkbox.side_effect = [True, False]
     mock_st.button.return_value = False
 
-    max_reels, delay_range, check_comments, headless = render_sidebar()
+    selected_profile, max_reels, delay_range, check_comments, headless = render_sidebar()
 
-    mock_st.success.assert_called_with("🟢 Đã có phiên đăng nhập")
+    mock_st.success.assert_called_with("🟢 Đã đăng nhập (default)")
+    assert selected_profile == "default"
     assert max_reels == 25
     assert delay_range == (2.0, 5.0)
     assert check_comments is True
@@ -217,14 +219,16 @@ def test_render_sidebar_logged_in(mock_st, mock_has_session):
 def test_render_sidebar_not_logged_in(mock_st, mock_has_session):
     """Kiểm tra render sidebar khi chưa có phiên đăng nhập."""
     mock_has_session.return_value = False
+    mock_st.selectbox.return_value = "default"
     mock_st.number_input.return_value = 10
     mock_st.slider.return_value = (3.0, 6.0)
     mock_st.checkbox.side_effect = [False, True]
     mock_st.button.return_value = False
 
-    max_reels, delay_range, check_comments, headless = render_sidebar()
+    selected_profile, max_reels, delay_range, check_comments, headless = render_sidebar()
 
-    mock_st.warning.assert_called_with("🟡 Chưa đăng nhập")
+    mock_st.warning.assert_called_with("🟡 Chưa đăng nhập (default)")
+    assert selected_profile == "default"
     assert max_reels == 10
     assert check_comments is False
     assert headless is True
@@ -236,14 +240,16 @@ def test_render_sidebar_not_logged_in(mock_st, mock_has_session):
 def test_render_sidebar_launch_login(mock_st, mock_has_session, mock_launch):
     """Kiểm tra nhấn nút mở trình duyệt đăng nhập trong sidebar."""
     mock_has_session.return_value = False
-    mock_st.button.return_value = True
+    mock_st.selectbox.return_value = "default"
+    # Các nút trong sidebar: 1. btn_save_cookie (False), 2. btn_launch (True), 3. btn_create (False)
+    mock_st.button.side_effect = [False, True, False]
     mock_st.number_input.return_value = 20
     mock_st.slider.return_value = (2.0, 5.0)
     mock_st.checkbox.side_effect = [True, True]
 
     render_sidebar()
 
-    mock_launch.assert_called_once_with(headless=False)
+    mock_launch.assert_called_once_with("default", headless=False)
     mock_st.rerun.assert_called_once()
 
 
@@ -256,7 +262,7 @@ def _mock_columns(spec):
 @patch("app.st")
 def test_main_initial_render(mock_st, mock_render_sidebar):
     """Kiểm tra render trang chính khi không có thao tác cào."""
-    mock_render_sidebar.return_value = (20, (2.0, 5.0), True, True)
+    mock_render_sidebar.return_value = ("default", 20, (2.0, 5.0), True, True)
 
     mock_tab1 = MagicMock()
     mock_tab2 = MagicMock()
@@ -292,7 +298,7 @@ def test_main_trigger_crawl_page(
     tmp_path,
 ):
     """Kiểm tra kích hoạt cào từ Tab 1 (Fanpage URL)."""
-    mock_render_sidebar.return_value = (10, (2.0, 4.0), True, True)
+    mock_render_sidebar.return_value = ("default", 10, (2.0, 4.0), True, True)
     mock_tab1 = MagicMock()
     mock_tab2 = MagicMock()
     mock_st.tabs.return_value = [mock_tab1, mock_tab2]
@@ -317,6 +323,7 @@ def test_main_trigger_crawl_page(
     assert call_kwargs["input_type"] == "page"
     assert call_kwargs["target_data"] == "https://www.facebook.com/kenh14.vn"
     assert call_kwargs["max_reels"] == 10
+    assert call_kwargs["profile_name"] == "default"
     assert mock_st.session_state["results"] == dummy_results
     assert mock_st.session_state["excel_bytes"] == b"excelbytes"
 
@@ -335,7 +342,7 @@ def test_main_trigger_crawl_list(
     tmp_path,
 ):
     """Kiểm tra kích hoạt cào từ Tab 2 (Danh sách URL Reels lẻ)."""
-    mock_render_sidebar.return_value = (5, (1.0, 3.0), False, False)
+    mock_render_sidebar.return_value = ("default", 5, (1.0, 3.0), False, False)
     mock_tab1 = MagicMock()
     mock_tab2 = MagicMock()
     mock_st.tabs.return_value = [mock_tab1, mock_tab2]
@@ -369,6 +376,7 @@ def test_main_trigger_crawl_list(
     assert call_kwargs["max_reels"] == 5
     assert call_kwargs["check_comments"] is False
     assert call_kwargs["headless"] is False
+    assert call_kwargs["profile_name"] == "default"
     assert mock_st.session_state["results"] == dummy_results
     assert mock_st.session_state["excel_bytes"] == b"bytes_list"
 
@@ -427,7 +435,7 @@ def test_file_upload_bom_handling():
 @patch("app.st")
 def test_main_click_stop_button(mock_st, mock_render_sidebar):
     """Kiểm tra người dùng nhấn nút Dừng cào trong Tab 1."""
-    mock_render_sidebar.return_value = (10, (2.0, 4.0), True, True)
+    mock_render_sidebar.return_value = ("default", 10, (2.0, 4.0), True, True)
     mock_tab1 = MagicMock()
     mock_tab2 = MagicMock()
     mock_st.tabs.return_value = [mock_tab1, mock_tab2]
