@@ -4,17 +4,17 @@ from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-import pandas as pd
-from config import OUTPUT_DIR
+
+from src.config import EXCEL_DIR, OUTPUT_DIR
 
 COLUMNS_MAP = {
     "stt": "STT",
     "reel_url": "Link Reel",
-    "caption": "Mô tả Reel",
+    "caption": "Tiêu đề Reels",
     "found_in": "Vị trí tìm thấy link",
     "target_url": "Link Web",
-    "title": "Tiêu đề bài viết",
     "content": "Nội dung bài viết",
+    "video_path": "Đường dẫn Video",
     "status": "Trạng thái",
     "scraped_at": "Thời gian cào",
 }
@@ -58,8 +58,8 @@ def _build_formatted_workbook(records: list[dict]) -> openpyxl.Workbook:
             rec.get("caption", ""),
             rec.get("found_in", ""),
             rec.get("target_url", ""),
-            rec.get("title", ""),
-            rec.get("content", ""),
+            rec.get("content", "") or rec.get("title", ""),
+            rec.get("video_path", ""),
             rec.get("status", ""),
             rec.get("scraped_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         ]
@@ -71,8 +71,7 @@ def _build_formatted_workbook(records: list[dict]) -> openpyxl.Workbook:
             cell.font = Font(name="Segoe UI", size=10)
             cell.border = thin_border
             header_name = headers[col_num - 1]
-            # Đặt wrap text cho cột mô tả và nội dung bài viết
-            if header_name in ["Mô tả Reel", "Nội dung bài viết", "Tiêu đề bài viết"]:
+            if header_name in ["Tiêu đề Reels", "Nội dung bài viết"]:
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
             elif header_name in ["STT", "Vị trí tìm thấy link", "Trạng thái", "Thời gian cào"]:
                 cell.alignment = Alignment(horizontal="center", vertical="top")
@@ -83,11 +82,11 @@ def _build_formatted_workbook(records: list[dict]) -> openpyxl.Workbook:
     column_widths = {
         "A": 8,   # STT
         "B": 35,  # Link Reel
-        "C": 40,  # Mô tả Reel
-        "D": 20,  # Vị trí
+        "C": 40,  # Tiêu đề Reels
+        "D": 20,  # Vị trí tìm thấy link
         "E": 35,  # Link Web
-        "F": 35,  # Tiêu đề bài viết
-        "G": 65,  # Nội dung bài viết
+        "F": 65,  # Nội dung bài viết
+        "G": 35,  # Đường dẫn Video
         "H": 20,  # Trạng thái
         "I": 22,  # Thời gian cào
     }
@@ -97,23 +96,51 @@ def _build_formatted_workbook(records: list[dict]) -> openpyxl.Workbook:
     return wb
 
 
-def export_to_excel(records: list[dict], output_filepath: Path | str | None = None) -> Path:
-    """Lưu danh sách bản ghi ra file Excel."""
-    if output_filepath is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filepath = OUTPUT_DIR / f"reels_content_{timestamp}.xlsx"
+def export_to_excel(
+    records: list[dict],
+    output_filepath: Path | str | None = None,
+    output_dir: Path | str | None = None
+) -> Path:
+    """Lưu danh sách bản ghi ra file Excel (mặc định lưu tại EXCEL_DIR hoặc output_dir)."""
+    if output_filepath is not None:
+        p = Path(output_filepath)
+        if p.is_dir() or (not p.suffix and not p.exists()):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_filepath = p / f"reels_content_{timestamp}.xlsx"
+        else:
+            output_filepath = p
     else:
-        output_filepath = Path(output_filepath)
+        target_dir = Path(output_dir) if output_dir else EXCEL_DIR
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filepath = target_dir / f"reels_content_{timestamp}.xlsx"
 
     output_filepath.parent.mkdir(parents=True, exist_ok=True)
-
     wb = _build_formatted_workbook(records)
     wb.save(output_filepath)
     return output_filepath
 
 
+def export_captions_to_txt(records: list[dict], target_dir: Path | str) -> tuple[int, Path]:
+    """Lưu tiêu đề/caption của từng Reel thành các file caption_{số_thứ_tự}.txt trong target_dir.
+    
+    Returns:
+        (count: int, saved_dir: Path)
+    """
+    target = Path(target_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for idx, rec in enumerate(records, start=1):
+        stt = rec.get("stt") or idx
+        caption = rec.get("caption", "") or ""
+        txt_path = target / f"caption_{stt}.txt"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(caption)
+        count += 1
+    return count, target
+
+
 def get_excel_bytes(records: list[dict]) -> bytes:
-    """Trả về buffer bytes Excel phục vụ tải về trực tiếp từ Web UI."""
+    """Trả về buffer bytes Excel phục vụ tải về trực tiếp."""
     wb = _build_formatted_workbook(records)
     buffer = BytesIO()
     wb.save(buffer)

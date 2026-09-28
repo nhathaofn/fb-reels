@@ -6,7 +6,7 @@ import httpx
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from article_extractor import extract_article_from_html, resolve_target_url, extract_article
+from src.core.article_extractor import extract_article_from_html, resolve_target_url, extract_article
 
 
 def test_extract_article_from_html():
@@ -176,7 +176,7 @@ def test_extract_article_empty_url():
 
 
 def test_extract_article_http_error():
-    with patch("article_extractor.resolve_target_url", return_value="https://example.com/404"):
+    with patch("src.core.article_extractor.resolve_target_url", return_value="https://example.com/404"):
         with patch("httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_response = MagicMock()
@@ -190,7 +190,7 @@ def test_extract_article_http_error():
 
 
 def test_extract_article_network_exception():
-    with patch("article_extractor.resolve_target_url", return_value="https://example.com/error"):
+    with patch("src.core.article_extractor.resolve_target_url", return_value="https://example.com/error"):
         with patch("httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_client.get.side_effect = httpx.ConnectTimeout("Connection timed out")
@@ -212,7 +212,7 @@ def test_extract_article_success():
     </body>
     </html>
     """
-    with patch("article_extractor.resolve_target_url", return_value="https://example.com/news/1"):
+    with patch("src.core.article_extractor.resolve_target_url", return_value="https://example.com/news/1"):
         with patch("httpx.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_response = MagicMock()

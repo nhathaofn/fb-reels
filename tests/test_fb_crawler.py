@@ -6,7 +6,7 @@ import pytest
 # Ensure project root is in sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fb_crawler import (
+from src.core.fb_crawler import (
     normalize_reels_url,
     extract_urls_from_text,
     has_logged_in_session,
@@ -23,6 +23,7 @@ from fb_crawler import (
     save_profile_settings,
     load_profile_last_results,
     save_profile_last_results,
+    clean_caption_text,
 )
 
 
@@ -75,8 +76,8 @@ def test_extract_urls_from_text():
 def test_has_logged_in_session(tmp_path, monkeypatch):
     import sqlite3
     test_profile = tmp_path / "browser_profile"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", test_profile)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", test_profile / "profiles")
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", test_profile)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", test_profile / "profiles")
 
     # Thư mục chưa tồn tại
     assert has_logged_in_session() is False
@@ -119,12 +120,17 @@ def test_crawl_reels_from_tab():
     
     mock_page.query_selector_all.return_value = [link1, link2, link3, link4]
 
-    urls = crawl_reels_from_tab(mock_page, "https://www.facebook.com/kenh14.vn/reels/", max_count=2, delay_range=(0.01, 0.02))
-    
-    assert len(urls) == 2
-    assert urls[0] == "https://www.facebook.com/reel/100001"
-    assert urls[1] == "https://www.facebook.com/reel/100002"
-    mock_page.goto.assert_called_once_with("https://www.facebook.com/kenh14.vn/reels/", wait_until="domcontentloaded", timeout=45000)
+    # Chế độ mặc định (oldest): video ở đáy feed (100003 - đăng đầu tiên) đứng đầu STT 1
+    urls_oldest = crawl_reels_from_tab(mock_page, "https://www.facebook.com/kenh14.vn/reels/", max_count=2, delay_range=(0.01, 0.02), crawl_order="oldest")
+    assert len(urls_oldest) == 2
+    assert urls_oldest[0] == "https://www.facebook.com/reel/100003"
+    assert urls_oldest[1] == "https://www.facebook.com/reel/100002"
+
+    # Chế độ newest: video ở đỉnh feed (100001 - mới nhất) đứng đầu
+    urls_newest = crawl_reels_from_tab(mock_page, "https://www.facebook.com/kenh14.vn/reels/", max_count=2, delay_range=(0.01, 0.02), crawl_order="newest")
+    assert len(urls_newest) == 2
+    assert urls_newest[0] == "https://www.facebook.com/reel/100001"
+    assert urls_newest[1] == "https://www.facebook.com/reel/100002"
 
 
 def test_extract_single_reel_caption_url():
@@ -135,7 +141,7 @@ def test_extract_single_reel_caption_url():
     cap_el.inner_text.return_value = "Tin tức nóng hôm nay xem tại https://vnexpress.net/tin-nong-123.htm"
     mock_page.query_selector_all.return_value = [cap_el]
 
-    with patch("fb_crawler.extract_article") as mock_extract:
+    with patch("src.core.fb_crawler.extract_article") as mock_extract:
         mock_extract.return_value = {
             "title": "Tin nóng hôm nay",
             "content": "Nội dung chi tiết tin nóng...",
@@ -177,7 +183,7 @@ def test_extract_single_reel_comment_url():
 
     mock_page.query_selector_all.side_effect = fake_query_selector_all
 
-    with patch("fb_crawler.extract_article") as mock_extract:
+    with patch("src.core.fb_crawler.extract_article") as mock_extract:
         mock_extract.return_value = {
             "title": "Bài viết Tuổi Trẻ",
             "content": "Nội dung bài viết tuổi trẻ...",
@@ -217,9 +223,9 @@ def test_extract_single_reel_no_url():
 def test_run_crawler_pipeline_page_mode():
     mock_callback = MagicMock()
 
-    with patch("fb_crawler.sync_playwright") as mock_playwright_ctx, \
-         patch("fb_crawler.crawl_reels_from_tab") as mock_crawl_tab, \
-         patch("fb_crawler.extract_single_reel") as mock_extract_single:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_playwright_ctx, \
+         patch("src.core.fb_crawler.crawl_reels_from_tab") as mock_crawl_tab, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract_single:
 
         mock_playwright = MagicMock()
         mock_playwright_ctx.return_value.__enter__.return_value = mock_playwright
@@ -233,8 +239,8 @@ def test_run_crawler_pipeline_page_mode():
             "https://www.facebook.com/reel/222"
         ]
         mock_extract_single.side_effect = [
-            {"reel_url": "https://www.facebook.com/reel/111", "title": "Tin 1"},
-            {"reel_url": "https://www.facebook.com/reel/222", "title": "Tin 2"}
+            {"reel_url": "https://www.facebook.com/reel/222", "title": "Tin 2"},
+            {"reel_url": "https://www.facebook.com/reel/111", "title": "Tin 1"}
         ]
 
         results = run_crawler_pipeline(
@@ -248,15 +254,17 @@ def test_run_crawler_pipeline_page_mode():
         )
 
         assert len(results) == 2
-        assert results[0]["title"] == "Tin 1"
-        assert results[1]["title"] == "Tin 2"
+        assert results[0]["title"] == "Tin 2"
+        assert results[0]["stt"] == 1
+        assert results[1]["title"] == "Tin 1"
+        assert results[1]["stt"] == 2
         assert mock_callback.call_count >= 2
         mock_context.close.assert_called_once()
 
 
 def test_run_crawler_pipeline_list_mode_and_crawl_reels():
-    with patch("fb_crawler.sync_playwright") as mock_playwright_ctx, \
-         patch("fb_crawler.extract_single_reel") as mock_extract_single:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_playwright_ctx, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract_single:
 
         mock_playwright = MagicMock()
         mock_playwright_ctx.return_value.__enter__.return_value = mock_playwright
@@ -282,8 +290,8 @@ def test_run_crawler_pipeline_list_mode_and_crawl_reels():
 
 
 def test_run_crawler_pipeline_empty():
-    with patch("fb_crawler.sync_playwright") as mock_playwright_ctx, \
-         patch("fb_crawler.crawl_reels_from_tab") as mock_crawl_tab:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_playwright_ctx, \
+         patch("src.core.fb_crawler.crawl_reels_from_tab") as mock_crawl_tab:
 
         mock_playwright = MagicMock()
         mock_playwright_ctx.return_value.__enter__.return_value = mock_playwright
@@ -308,8 +316,8 @@ def test_run_crawler_pipeline_empty():
 def test_run_crawler_pipeline_single_reel_exception_isolated():
     mock_callback = MagicMock()
 
-    with patch("fb_crawler.sync_playwright") as mock_playwright_ctx, \
-         patch("fb_crawler.extract_single_reel") as mock_extract_single:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_playwright_ctx, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract_single:
 
         mock_playwright = MagicMock()
         mock_playwright_ctx.return_value.__enter__.return_value = mock_playwright
@@ -356,8 +364,8 @@ def test_run_crawler_pipeline_single_reel_exception_isolated():
 
 def test_run_crawler_pipeline_stop_check_callback():
     """Kiểm tra dừng cào sớm khi nhận tín hiệu stop_check_callback."""
-    with patch("fb_crawler.sync_playwright") as mock_pw, \
-         patch("fb_crawler.extract_single_reel") as mock_extract:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_pw, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract:
 
         mock_context = MagicMock()
         mock_page = MagicMock()
@@ -398,12 +406,71 @@ def test_run_crawler_pipeline_stop_check_callback():
         assert mock_extract.call_count == 1
 
 
+def test_run_crawler_pipeline_auto_saves_captions(tmp_path):
+    """Kiểm tra pipeline tự động xuất file caption_{idx}.txt ngay khi cào xong từng link."""
+    with patch("src.core.fb_crawler.sync_playwright") as mock_pw, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract:
+
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_pw.return_value.__enter__.return_value.chromium.launch_persistent_context.return_value = mock_context
+
+        mock_extract.side_effect = [
+            {
+                "reel_url": "https://www.facebook.com/reel/111",
+                "caption": "Nội dung caption 1",
+                "found_in": "Trong mô tả",
+                "target_url": "",
+                "title": "",
+                "content": "",
+                "status": "Thành công",
+                "scraped_at": "2026-09-28 09:00:00"
+            },
+            {
+                "reel_url": "https://www.facebook.com/reel/222",
+                "caption": "Nội dung caption 2",
+                "found_in": "Trong mô tả",
+                "target_url": "",
+                "title": "",
+                "content": "",
+                "status": "Thành công",
+                "scraped_at": "2026-09-28 09:01:00"
+            }
+        ]
+
+        target_cap_dir = tmp_path / "custom_captions"
+        reels_list = [
+            "https://www.facebook.com/reel/111",
+            "https://www.facebook.com/reel/222"
+        ]
+
+        results = run_crawler_pipeline(
+            input_type="list",
+            target_data=reels_list,
+            max_reels=2,
+            caption_output_dir=target_cap_dir,
+            auto_save_captions=True
+        )
+
+        assert len(results) == 2
+        cap1 = target_cap_dir / "caption_1.txt"
+        cap2 = target_cap_dir / "caption_2.txt"
+
+        assert cap1.exists()
+        assert cap2.exists()
+        assert cap1.read_text(encoding="utf-8") == "Nội dung caption 1"
+        assert cap2.read_text(encoding="utf-8") == "Nội dung caption 2"
+        assert results[0]["caption_path"] == str(cap1)
+        assert results[1]["caption_path"] == str(cap2)
+
+
 def test_get_profile_dir(tmp_path, monkeypatch):
     """Kiểm tra trả về đúng thư mục profile."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # default
     assert get_profile_dir("default") == mock_base
@@ -425,7 +492,7 @@ def test_list_available_profiles(tmp_path, monkeypatch):
     """Kiểm tra liệt kê các profile có sẵn."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # Khi thư mục profiles chưa có
     assert list_available_profiles() == ["default"]
@@ -444,8 +511,8 @@ def test_delete_profile(tmp_path, monkeypatch):
     """Kiểm tra xóa profile."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # Tạo profile con may_1
     p1 = mock_sub / "may_1"
@@ -501,8 +568,8 @@ def test_save_cookies_to_profile(tmp_path, monkeypatch):
     """Kiểm tra lưu cookie vào profile."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # 1. Cookie không hợp lệ
     success, msg = save_cookies_to_profile("default", "invalid_text")
@@ -510,7 +577,7 @@ def test_save_cookies_to_profile(tmp_path, monkeypatch):
     assert "Không tìm thấy cookie hợp lệ" in msg
 
     # 2. Mock Playwright lưu thành công
-    with patch("fb_crawler.sync_playwright") as mock_pw:
+    with patch("src.core.fb_crawler.sync_playwright") as mock_pw:
         mock_context = MagicMock()
         mock_page = MagicMock()
         mock_context.pages = [mock_page]
@@ -528,8 +595,8 @@ def test_load_and_save_profile_settings(tmp_path, monkeypatch):
     """Kiểm tra lưu và nạp cấu hình settings.json cho profile."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # 1. Khi chưa có file settings.json, trả về defaults
     s1 = load_profile_settings("may_test")
@@ -560,8 +627,8 @@ def test_load_and_save_profile_last_results(tmp_path, monkeypatch):
     """Kiểm tra lưu và nạp kết quả cào gần nhất last_results.json."""
     mock_base = tmp_path / "browser_profile"
     mock_sub = mock_base / "profiles"
-    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
-    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("src.core.fb_crawler.PROFILES_DIR", mock_sub)
 
     # 1. Khi chưa có kết quả
     assert load_profile_last_results("may_test") == []
@@ -578,6 +645,16 @@ def test_load_and_save_profile_last_results(tmp_path, monkeypatch):
     assert len(loaded) == 2
     assert loaded[0]["title"] == "Bài 1"
     assert loaded[1]["reel_url"] == "https://fb.com/reel/2"
+
+
+def test_clean_caption_text():
+    assert clean_caption_text("") == ""
+    assert clean_caption_text("This is original caption.") == "This is original caption."
+    assert clean_caption_text("Caption text...\nẨn bản dịch") == "Caption text..."
+    assert clean_caption_text("Caption text... Xem thêm\nẨn bản dịch") == "Caption text"
+    assert clean_caption_text("Story details... See more\nSee original") == "Story details"
+    assert clean_caption_text("Story details... See less") == "Story details"
+    assert clean_caption_text("Some text\nRate this translation") == "Some text"
 
 
 

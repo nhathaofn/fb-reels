@@ -2,9 +2,9 @@ import logging
 import httpx
 import trafilatura
 from bs4 import BeautifulSoup
-from config import USER_AGENT, REQUEST_TIMEOUT
+from src.config import USER_AGENT, REQUEST_TIMEOUT
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("article_extractor")
 
 
 def resolve_target_url(url: str, timeout: float = REQUEST_TIMEOUT) -> str:
