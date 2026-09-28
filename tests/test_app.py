@@ -285,6 +285,8 @@ def test_main_initial_render(mock_st, mock_render_sidebar, mock_load_results):
     assert mock_st.session_state["results"] == []
 
 
+@patch("app.save_profile_settings")
+@patch("app.save_profile_last_results")
 @patch("app.export_to_excel")
 @patch("app.get_excel_bytes")
 @patch("app.run_crawler_pipeline")
@@ -296,6 +298,8 @@ def test_main_trigger_crawl_page(
     mock_crawler,
     mock_get_bytes,
     mock_export,
+    mock_save_results,
+    mock_save_settings,
     tmp_path,
 ):
     """Kiểm tra kích hoạt cào từ Tab 1 (Fanpage URL)."""
@@ -329,6 +333,8 @@ def test_main_trigger_crawl_page(
     assert mock_st.session_state["excel_bytes"] == b"excelbytes"
 
 
+@patch("app.save_profile_settings")
+@patch("app.save_profile_last_results")
 @patch("app.export_to_excel")
 @patch("app.get_excel_bytes")
 @patch("app.run_crawler_pipeline")
@@ -340,6 +346,8 @@ def test_main_trigger_crawl_list(
     mock_crawler,
     mock_get_bytes,
     mock_export,
+    mock_save_results,
+    mock_save_settings,
     tmp_path,
 ):
     """Kiểm tra kích hoạt cào từ Tab 2 (Danh sách URL Reels lẻ)."""
