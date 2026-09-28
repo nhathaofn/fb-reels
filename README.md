@@ -109,6 +109,11 @@ Vì Playwright chạy trên máy chủ nên máy trạm trong mạng LAN không 
 3. Cửa sổ Chromium bật lên trên màn hình máy chủ, đăng nhập tài khoản Facebook bình thường (hỗ trợ cả 2FA).
 4. Đăng nhập xong, đóng trình duyệt lại và bấm **"🔄 Tôi đã đăng nhập xong"**.
 
+### 4. Cơ chế URL Route & Tự động lưu cấu hình (Không lo bị mất khi F5)
+- **Tự động gắn route URL**: Khi bạn chọn hoặc tạo Profile, trình duyệt sẽ tự động gắn tham số URL tương ứng: `http://<IP_MAY_CHU>:8501/?profile=<tên_profile>` (ví dụ: `http://192.168.1.27:8501/?profile=may_nam`).
+- **Bookmark tiện lợi**: Bạn có thể lưu dấu trang (Bookmark) đường link có gắn `?profile=...` này trên trình duyệt máy bạn để luôn mở đúng tài khoản của mình.
+- **Không sợ F5 mất cấu hình**: Mọi thông số thiết lập cào (Số Reels, delay, quét bình luận, headless, link Fanpage nhập gần nhất) và bảng kết quả cào đều được **tự động lưu vào profile**. Khi bấm **F5 (Reload trang)**, toàn bộ trạng thái đăng nhập, thiết lập và kết quả đều được giữ nguyên vẹn 100%!
+
 ---
 
 ## 📖 Hướng Dẫn Sử Dụng Chi Tiết
@@ -201,7 +206,7 @@ Dự án tuân thủ phương pháp phát triển kiểm thử nghiêm ngặt (T
 pytest tests/ -v
 ```
 
-Kết quả: **59/59 test cases vượt qua (100% Passed)**.
+Kết quả: **61/61 test cases vượt qua (100% Passed)**.
 
 ---
 

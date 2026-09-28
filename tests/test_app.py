@@ -258,9 +258,10 @@ def _mock_columns(spec):
     return [MagicMock() for _ in range(count)]
 
 
+@patch("app.load_profile_last_results", return_value=[])
 @patch("app.render_sidebar")
 @patch("app.st")
-def test_main_initial_render(mock_st, mock_render_sidebar):
+def test_main_initial_render(mock_st, mock_render_sidebar, mock_load_results):
     """Kiểm tra render trang chính khi không có thao tác cào."""
     mock_render_sidebar.return_value = ("default", 20, (2.0, 5.0), True, True)
 
@@ -306,8 +307,8 @@ def test_main_trigger_crawl_page(
 
     # Giả lập người dùng nhập link và bấm nút cào ở Tab 1
     mock_st.text_input.return_value = "https://www.facebook.com/kenh14.vn"
-    # start_tab1 (True), btn_stop_page (False), start_tab2 (False), btn_stop_list (False)
-    mock_st.button.side_effect = [True, False, False, False]
+    # start_tab1 (True), btn_stop_page (False), start_tab2 (False), btn_stop_list (False), btn_clear_results (False)
+    mock_st.button.side_effect = [True, False, False, False, False]
 
     dummy_results = [{"reel_url": "https://www.facebook.com/reel/1", "status": "Thành công"}]
     mock_crawler.return_value = dummy_results
@@ -351,8 +352,8 @@ def test_main_trigger_crawl_list(
     # Giả lập người dùng nhập danh sách link ở Tab 2
     mock_st.text_area.return_value = "https://www.facebook.com/reel/111\nhttps://www.facebook.com/reel/222"
     mock_st.file_uploader.return_value = None
-    # start_tab1 (False), btn_stop_page (False), start_tab2 (True), btn_stop_list (False)
-    mock_st.button.side_effect = [False, False, True, False]
+    # start_tab1 (False), btn_stop_page (False), start_tab2 (True), btn_stop_list (False), btn_clear_results (False)
+    mock_st.button.side_effect = [False, False, True, False, False]
 
     dummy_results = [
         {"reel_url": "https://www.facebook.com/reel/111", "status": "Thành công"},
@@ -431,9 +432,10 @@ def test_file_upload_bom_handling():
     assert not urls[0].startswith("\ufeff")
 
 
+@patch("app.load_profile_last_results", return_value=[])
 @patch("app.render_sidebar")
 @patch("app.st")
-def test_main_click_stop_button(mock_st, mock_render_sidebar):
+def test_main_click_stop_button(mock_st, mock_render_sidebar, mock_load_results):
     """Kiểm tra người dùng nhấn nút Dừng cào trong Tab 1."""
     mock_render_sidebar.return_value = ("default", 10, (2.0, 4.0), True, True)
     mock_tab1 = MagicMock()

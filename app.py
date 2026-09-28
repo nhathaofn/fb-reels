@@ -11,8 +11,12 @@ from fb_crawler import (
     has_logged_in_session,
     launch_login_browser,
     list_available_profiles,
+    load_profile_last_results,
+    load_profile_settings,
     run_crawler_pipeline,
     save_cookies_to_profile,
+    save_profile_last_results,
+    save_profile_settings,
 )
 
 
@@ -94,18 +98,41 @@ def render_sidebar():
 
         # Danh sách profile
         available_profiles = list_available_profiles()
+
+        # Kiểm tra query parameter ?profile=... để nhớ route profile khi F5
+        default_idx = 0
+        try:
+            if hasattr(st, "query_params"):
+                qp_profile = st.query_params.get("profile")
+                if qp_profile and qp_profile in available_profiles:
+                    default_idx = available_profiles.index(qp_profile)
+        except Exception:
+            pass
+
         selected_profile = st.selectbox(
             "Chọn Profile:",
             options=available_profiles,
-            index=0,
+            index=default_idx,
             help="Mỗi máy tính hoặc người dùng trong mạng LAN có thể chọn hoặc tạo một Profile riêng."
         )
+
+        # Cập nhật query param trên URL trình duyệt
+        try:
+            if hasattr(st, "query_params") and st.query_params.get("profile") != selected_profile:
+                st.query_params["profile"] = selected_profile
+        except Exception:
+            pass
 
         is_logged_in = has_logged_in_session(selected_profile)
         if is_logged_in:
             st.success(f"🟢 Đã đăng nhập ({selected_profile})")
             if st.button(f"🗑️ Xóa phiên profile '{selected_profile}'", use_container_width=True):
                 delete_profile(selected_profile)
+                try:
+                    if hasattr(st, "query_params"):
+                        st.query_params["profile"] = "default"
+                except Exception:
+                    pass
                 st.info(f"Đã xóa dữ liệu phiên của profile '{selected_profile}'.")
                 st.rerun()
         else:
@@ -149,8 +176,14 @@ def render_sidebar():
             new_name = st.text_input("Tên Profile mới:", key="new_profile_input_field", placeholder="Ví dụ: May_2, Hao...")
             if st.button("Tạo Profile mới", use_container_width=True, key="btn_create_profile"):
                 if new_name.strip():
-                    get_profile_dir(new_name.strip())
-                    st.success(f"Đã tạo profile '{new_name.strip()}'!")
+                    created_dir = get_profile_dir(new_name.strip())
+                    clean_id = created_dir.name
+                    try:
+                        if hasattr(st, "query_params"):
+                            st.query_params["profile"] = clean_id
+                    except Exception:
+                        pass
+                    st.success(f"Đã tạo profile '{clean_id}'!")
                     time.sleep(0.5)
                     st.rerun()
                 else:
@@ -158,32 +191,52 @@ def render_sidebar():
 
         st.markdown("---")
         st.header("⚙️ Cấu hình cào")
+
+        # Nạp cấu hình đã lưu của profile
+        p_settings = load_profile_settings(selected_profile)
+
         max_reels = st.number_input(
             "Số lượng Reels tối đa:",
             min_value=1,
             max_value=500,
-            value=DEFAULT_MAX_REELS,
+            value=int(p_settings.get("max_reels", DEFAULT_MAX_REELS)),
             step=1,
-            help="Số lượng video Reels tối đa cần lấy trên mỗi Fanpage hoặc từ danh sách."
+            help="Số lượng video Reels tối đa cần lấy trên mỗi Fanpage hoặc từ danh sách.",
+            key=f"max_reels_val_{selected_profile}"
         )
         delay_range = st.slider(
             "Khoảng delay ngẫu nhiên (giây):",
             min_value=1.0,
             max_value=20.0,
-            value=(MIN_DELAY, MAX_DELAY),
+            value=(float(p_settings.get("delay_min", MIN_DELAY)), float(p_settings.get("delay_max", MAX_DELAY))),
             step=0.5,
-            help="Thời gian nghỉ ngẫu nhiên giữa các thao tác để tránh bị Facebook nghi vấn bot."
+            help="Thời gian nghỉ ngẫu nhiên giữa các thao tác để tránh bị Facebook nghi vấn bot.",
+            key=f"delay_range_val_{selected_profile}"
         )
         check_comments = st.checkbox(
             "Quét link trong bình luận",
-            value=True,
-            help="Nếu mô tả video không chứa link ngoài, mở khu vực bình luận để tìm link."
+            value=bool(p_settings.get("check_comments", True)),
+            help="Nếu mô tả video không chứa link ngoài, mở khu vực bình luận để tìm link.",
+            key=f"check_comments_val_{selected_profile}"
         )
         headless = st.checkbox(
             "Chạy ẩn trình duyệt (Headless)",
-            value=True,
-            help="Bật để trình duyệt chạy ngầm (tiết kiệm tài nguyên), tắt để hiển thị cửa sổ trực quan."
+            value=bool(p_settings.get("headless", True)),
+            help="Bật để trình duyệt chạy ngầm (tiết kiệm tài nguyên), tắt để hiển thị cửa sổ trực quan.",
+            key=f"headless_val_{selected_profile}"
         )
+
+        # Tự động lưu cấu hình khi người dùng điều chỉnh
+        cur_cfg = {
+            "max_reels": int(max_reels),
+            "delay_min": float(delay_range[0]),
+            "delay_max": float(delay_range[1]),
+            "check_comments": bool(check_comments),
+            "headless": bool(headless),
+            "last_page_url": p_settings.get("last_page_url", "")
+        }
+        if cur_cfg != p_settings:
+            save_profile_settings(selected_profile, cur_cfg)
 
         st.markdown("---")
         st.caption(f"📁 Dữ liệu xuất tự động lưu vào: `{OUTPUT_DIR}`")
@@ -216,6 +269,17 @@ def main():
 
     selected_profile, max_reels, delay_range, check_comments, headless = render_sidebar()
 
+    # Phục hồi cấu hình & kết quả cào của profile khi F5 hoặc đổi profile
+    p_settings = load_profile_settings(selected_profile)
+    if st.session_state.get("current_active_profile") != selected_profile:
+        st.session_state["current_active_profile"] = selected_profile
+        last_results = load_profile_last_results(selected_profile)
+        st.session_state["results"] = last_results
+        if last_results:
+            st.session_state["excel_bytes"] = get_excel_bytes(last_results)
+        else:
+            st.session_state["excel_bytes"] = None
+
     # Main content tabs
     tab1, tab2 = st.tabs(["🏢 Cào theo Fanpage / Profile", "🔗 Cào theo danh sách Reels lẻ"])
 
@@ -225,10 +289,12 @@ def main():
 
     with tab1:
         st.markdown("##### Quét tự động toàn bộ video Reels từ trang Fanpage hoặc Profile cá nhân")
+        saved_page_url = p_settings.get("last_page_url", "")
         page_url_input = st.text_input(
             "Nhập link Fanpage hoặc Profile Facebook:",
+            value=saved_page_url,
             placeholder="https://www.facebook.com/username hoặc https://www.facebook.com/profile.php?id=...",
-            key="page_url_input"
+            key=f"page_url_input_{selected_profile}"
         )
         col_b1, col_b2 = st.columns([3, 1])
         with col_b1:
@@ -242,6 +308,8 @@ def main():
             if not page_url_input.strip():
                 st.warning("⚠️ Vui lòng nhập link Fanpage hoặc Profile Facebook!")
             else:
+                p_settings["last_page_url"] = page_url_input.strip()
+                save_profile_settings(selected_profile, p_settings)
                 crawl_target_type = "page"
                 crawl_target_data = page_url_input.strip()
                 start_crawling = True
@@ -336,6 +404,7 @@ def main():
                     st.session_state["results"] = results
                     st.session_state["excel_bytes"] = excel_bytes
                     st.session_state["saved_filename"] = saved_path.name
+                    save_profile_last_results(selected_profile, results)
 
                     if was_stopped:
                         status_text.warning(
@@ -367,7 +436,7 @@ def main():
         display_df = build_display_dataframe(results)
         st.dataframe(display_df, use_container_width=True)
 
-        down_col1, down_col2 = st.columns(2)
+        down_col1, down_col2, down_col3 = st.columns([1, 1, 1])
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         with down_col1:
             if st.session_state.get("excel_bytes"):
@@ -389,6 +458,12 @@ def main():
                 use_container_width=True,
                 key="btn_download_csv"
             )
+        with down_col3:
+            if st.button("🗑️ Xóa kết quả này", use_container_width=True, key=f"btn_clear_results_{selected_profile}"):
+                st.session_state["results"] = []
+                st.session_state["excel_bytes"] = None
+                save_profile_last_results(selected_profile, [])
+                st.rerun()
 
 
 if __name__ == "__main__":

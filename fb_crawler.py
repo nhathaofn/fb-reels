@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from playwright.sync_api import sync_playwright
 
 from article_extractor import extract_article
-from config import MAX_DELAY, MIN_DELAY, PROFILE_DIR, PROFILES_DIR, USER_AGENT
+from config import DEFAULT_MAX_REELS, MAX_DELAY, MIN_DELAY, PROFILE_DIR, PROFILES_DIR, USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,67 @@ def delete_profile(profile_name: str) -> bool:
         shutil.rmtree(p_dir, ignore_errors=True)
         return True
     return False
+
+
+def load_profile_settings(profile_name: str = "default") -> dict:
+    """Đọc cấu hình đã lưu của profile từ file settings.json."""
+    p_dir = get_profile_dir(profile_name)
+    settings_file = p_dir / "settings.json"
+    defaults = {
+        "max_reels": DEFAULT_MAX_REELS,
+        "delay_min": MIN_DELAY,
+        "delay_max": MAX_DELAY,
+        "check_comments": True,
+        "headless": True,
+        "last_page_url": "",
+    }
+    if settings_file.exists():
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    defaults.update(data)
+        except Exception as e:
+            logger.warning(f"Lỗi khi đọc settings của profile {profile_name}: {e}")
+    return defaults
+
+
+def save_profile_settings(profile_name: str, settings: dict) -> None:
+    """Lưu cấu hình cào của profile vào file settings.json."""
+    try:
+        p_dir = get_profile_dir(profile_name)
+        settings_file = p_dir / "settings.json"
+        with open(settings_file, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Lỗi khi lưu settings của profile {profile_name}: {e}")
+
+
+def load_profile_last_results(profile_name: str = "default") -> list[dict]:
+    """Đọc kết quả cào gần nhất của profile từ last_results.json."""
+    p_dir = get_profile_dir(profile_name)
+    res_file = p_dir / "last_results.json"
+    if res_file.exists():
+        try:
+            with open(res_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            logger.warning(f"Lỗi khi đọc kết quả của profile {profile_name}: {e}")
+    return []
+
+
+def save_profile_last_results(profile_name: str, results: list[dict]) -> None:
+    """Lưu kết quả cào gần nhất của profile vào last_results.json."""
+    try:
+        p_dir = get_profile_dir(profile_name)
+        res_file = p_dir / "last_results.json"
+        with open(res_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Lỗi khi lưu kết quả của profile {profile_name}: {e}")
+
 
 
 def parse_cookie_input(cookie_input: str) -> list[dict]:

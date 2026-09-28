@@ -19,6 +19,10 @@ from fb_crawler import (
     delete_profile,
     parse_cookie_input,
     save_cookies_to_profile,
+    load_profile_settings,
+    save_profile_settings,
+    load_profile_last_results,
+    save_profile_last_results,
 )
 
 
@@ -502,5 +506,62 @@ def test_save_cookies_to_profile(tmp_path, monkeypatch):
         assert "Đã lưu thành công 2 cookies" in msg
         mock_context.add_cookies.assert_called_once()
         assert len(mock_context.add_cookies.call_args[0][0]) == 2
+
+
+def test_load_and_save_profile_settings(tmp_path, monkeypatch):
+    """Kiểm tra lưu và nạp cấu hình settings.json cho profile."""
+    mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
+    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+
+    # 1. Khi chưa có file settings.json, trả về defaults
+    s1 = load_profile_settings("may_test")
+    assert s1["max_reels"] == 20
+    assert s1["check_comments"] is True
+    assert s1["last_page_url"] == ""
+
+    # 2. Lưu cấu hình mới
+    custom_cfg = {
+        "max_reels": 50,
+        "delay_min": 1.5,
+        "delay_max": 3.5,
+        "check_comments": False,
+        "headless": False,
+        "last_page_url": "https://www.facebook.com/testpage"
+    }
+    save_profile_settings("may_test", custom_cfg)
+
+    # 3. Nạp lại và kiểm tra
+    s2 = load_profile_settings("may_test")
+    assert s2["max_reels"] == 50
+    assert s2["delay_min"] == 1.5
+    assert s2["check_comments"] is False
+    assert s2["last_page_url"] == "https://www.facebook.com/testpage"
+
+
+def test_load_and_save_profile_last_results(tmp_path, monkeypatch):
+    """Kiểm tra lưu và nạp kết quả cào gần nhất last_results.json."""
+    mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
+    monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
+
+    # 1. Khi chưa có kết quả
+    assert load_profile_last_results("may_test") == []
+
+    # 2. Lưu kết quả
+    dummy = [
+        {"reel_url": "https://fb.com/reel/1", "title": "Bài 1", "content": "Nội dung 1"},
+        {"reel_url": "https://fb.com/reel/2", "title": "Bài 2", "content": "Nội dung 2"}
+    ]
+    save_profile_last_results("may_test", dummy)
+
+    # 3. Nạp lại
+    loaded = load_profile_last_results("may_test")
+    assert len(loaded) == 2
+    assert loaded[0]["title"] == "Bài 1"
+    assert loaded[1]["reel_url"] == "https://fb.com/reel/2"
+
 
 
