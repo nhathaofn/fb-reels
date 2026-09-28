@@ -13,6 +13,7 @@ from app import (
     make_progress_callback,
     parse_reels_input,
     render_sidebar,
+    should_stop_crawl,
     main,
 )
 from exporter import COLUMNS_MAP
@@ -24,6 +25,7 @@ def test_module_structure_and_imports():
     assert callable(parse_reels_input)
     assert callable(make_progress_callback)
     assert callable(render_sidebar)
+    assert callable(should_stop_crawl)
     assert callable(main)
 
 
@@ -245,6 +247,11 @@ def test_render_sidebar_launch_login(mock_st, mock_has_session, mock_launch):
     mock_st.rerun.assert_called_once()
 
 
+def _mock_columns(spec):
+    count = len(spec) if isinstance(spec, (list, tuple)) else int(spec)
+    return [MagicMock() for _ in range(count)]
+
+
 @patch("app.render_sidebar")
 @patch("app.st")
 def test_main_initial_render(mock_st, mock_render_sidebar):
@@ -255,6 +262,7 @@ def test_main_initial_render(mock_st, mock_render_sidebar):
     mock_tab2 = MagicMock()
     mock_st.tabs.return_value = [mock_tab1, mock_tab2]
     mock_st.session_state = {}
+    mock_st.columns.side_effect = _mock_columns
 
     # Giả lập người dùng chưa nhấn nút nào
     mock_st.button.return_value = False
@@ -292,15 +300,15 @@ def test_main_trigger_crawl_page(
 
     # Giả lập người dùng nhập link và bấm nút cào ở Tab 1
     mock_st.text_input.return_value = "https://www.facebook.com/kenh14.vn"
-    mock_st.button.side_effect = [True, False]  # Tab 1 clicked, Tab 2 not
+    # start_tab1 (True), btn_stop_page (False), start_tab2 (False), btn_stop_list (False)
+    mock_st.button.side_effect = [True, False, False, False]
 
     dummy_results = [{"reel_url": "https://www.facebook.com/reel/1", "status": "Thành công"}]
     mock_crawler.return_value = dummy_results
     test_file = tmp_path / "test.xlsx"
     mock_export.return_value = test_file
     mock_get_bytes.return_value = b"excelbytes"
-
-    mock_st.columns.side_effect = lambda n: [MagicMock() for _ in range(n)]
+    mock_st.columns.side_effect = _mock_columns
 
     main()
 
@@ -336,7 +344,8 @@ def test_main_trigger_crawl_list(
     # Giả lập người dùng nhập danh sách link ở Tab 2
     mock_st.text_area.return_value = "https://www.facebook.com/reel/111\nhttps://www.facebook.com/reel/222"
     mock_st.file_uploader.return_value = None
-    mock_st.button.side_effect = [False, True]  # Tab 1 not clicked, Tab 2 clicked
+    # start_tab1 (False), btn_stop_page (False), start_tab2 (True), btn_stop_list (False)
+    mock_st.button.side_effect = [False, False, True, False]
 
     dummy_results = [
         {"reel_url": "https://www.facebook.com/reel/111", "status": "Thành công"},
@@ -346,7 +355,7 @@ def test_main_trigger_crawl_list(
     test_file = tmp_path / "test_list.xlsx"
     mock_export.return_value = test_file
     mock_get_bytes.return_value = b"bytes_list"
-    mock_st.columns.side_effect = lambda n: [MagicMock() for _ in range(n)]
+    mock_st.columns.side_effect = _mock_columns
 
     main()
 
@@ -362,3 +371,78 @@ def test_main_trigger_crawl_list(
     assert call_kwargs["headless"] is False
     assert mock_st.session_state["results"] == dummy_results
     assert mock_st.session_state["excel_bytes"] == b"bytes_list"
+
+
+def test_should_stop_crawl():
+    """Kiểm tra logic cờ should_stop_crawl từ session_state."""
+    with patch("app.st") as mock_st:
+        mock_st.session_state = {}
+        assert should_stop_crawl() is False
+
+        mock_st.session_state = {"stop_crawling": False}
+        assert should_stop_crawl() is False
+
+        mock_st.session_state = {"stop_crawling": True}
+        assert should_stop_crawl() is True
+
+
+def test_make_progress_callback_with_stop_check():
+    """Kiểm tra callback trả về False khi cờ dừng được bật."""
+    mock_bar = MagicMock()
+    mock_status = MagicMock()
+    mock_table = MagicMock()
+    results = []
+
+    # Giả lập cờ dừng trả về True
+    cb = make_progress_callback(
+        mock_bar,
+        mock_status,
+        mock_table,
+        results,
+        stop_check=lambda: True
+    )
+
+    res = cb(1, 5, "Đang cào...", None)
+    assert res is False
+    # Không tiếp tục cập nhật UI khi đã dừng
+    mock_bar.progress.assert_not_called()
+
+
+def test_file_upload_bom_handling():
+    """Kiểm tra file txt có BOM UTF-8 (từ Notepad Windows) được decode chính xác và không bị lỗi \ufeff."""
+    bom_content = "\ufeffhttps://www.facebook.com/reel/111\nhttps://www.facebook.com/reel/222".encode("utf-8")
+    mock_file = MagicMock()
+    mock_file.getvalue.return_value = bom_content
+
+    decoded_text = mock_file.getvalue().decode("utf-8-sig", errors="ignore")
+    urls = parse_reels_input("", decoded_text)
+    assert urls == [
+        "https://www.facebook.com/reel/111",
+        "https://www.facebook.com/reel/222",
+    ]
+    assert not urls[0].startswith("\ufeff")
+
+
+@patch("app.render_sidebar")
+@patch("app.st")
+def test_main_click_stop_button(mock_st, mock_render_sidebar):
+    """Kiểm tra người dùng nhấn nút Dừng cào trong Tab 1."""
+    mock_render_sidebar.return_value = (10, (2.0, 4.0), True, True)
+    mock_tab1 = MagicMock()
+    mock_tab2 = MagicMock()
+    mock_st.tabs.return_value = [mock_tab1, mock_tab2]
+    mock_st.session_state = {}
+    mock_st.columns.side_effect = _mock_columns
+
+    # Giả lập bấm nút Dừng ở Tab 1
+    # Buttons trong main:
+    # 1. start_tab1 (False)
+    # 2. btn_stop_page (True)
+    # 3. start_tab2 (False)
+    # 4. btn_stop_list (False)
+    mock_st.button.side_effect = [False, True, False, False]
+
+    main()
+
+    assert mock_st.session_state["stop_crawling"] is True
+    mock_st.toast.assert_called_with("⏹️ Đang gửi tín hiệu dừng cào...")

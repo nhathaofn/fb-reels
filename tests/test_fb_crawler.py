@@ -330,3 +330,47 @@ def test_run_crawler_pipeline_single_reel_exception_isolated():
         # Callback được gọi đủ 2 lần
         assert mock_callback.call_count >= 2
 
+
+def test_run_crawler_pipeline_stop_check_callback():
+    """Kiểm tra dừng cào sớm khi nhận tín hiệu stop_check_callback."""
+    with patch("fb_crawler.sync_playwright") as mock_pw, \
+         patch("fb_crawler.extract_single_reel") as mock_extract:
+
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_pw.return_value.__enter__.return_value.chromium.launch_persistent_context.return_value = mock_context
+
+        mock_extract.return_value = {
+            "reel_url": "https://www.facebook.com/reel/111",
+            "caption": "Mô tả 1",
+            "found_in": "Trong mô tả",
+            "target_url": "https://example.com/1",
+            "title": "Tin 1",
+            "content": "Nội dung 1",
+            "status": "Thành công",
+            "scraped_at": "2026-09-28 09:00:00"
+        }
+
+        # Giả lập stop_check_callback trả về False lần 1, True lần 2 (dừng trước reel 2)
+        stop_signals = [False, True]
+        def fake_stop():
+            return stop_signals.pop(0) if stop_signals else True
+
+        reels_list = [
+            "https://www.facebook.com/reel/111",
+            "https://www.facebook.com/reel/222",
+            "https://www.facebook.com/reel/333"
+        ]
+        results = run_crawler_pipeline(
+            input_type="list",
+            target_data=reels_list,
+            max_reels=3,
+            stop_check_callback=fake_stop
+        )
+
+        # Chỉ cào được 1 reel đầu tiên trước khi dừng
+        assert len(results) == 1
+        assert results[0]["reel_url"] == "https://www.facebook.com/reel/111"
+        assert mock_extract.call_count == 1
+

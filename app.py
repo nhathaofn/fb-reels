@@ -1,5 +1,4 @@
 from datetime import datetime
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 
@@ -47,9 +46,23 @@ def parse_reels_input(text_content: str = "", file_content: str = "") -> list[st
     return urls
 
 
-def make_progress_callback(progress_bar, status_text, table_placeholder, results_holder: list):
+def should_stop_crawl() -> bool:
+    """Kiểm tra xem người dùng đã bấm nút yêu cầu dừng cào hay chưa."""
+    return bool(st.session_state.get("stop_crawling", False))
+
+
+def make_progress_callback(
+    progress_bar,
+    status_text,
+    table_placeholder,
+    results_holder: list,
+    stop_check=None
+):
     """Tạo hàm callback cập nhật tiến trình cào dữ liệu lên giao diện Streamlit."""
     def callback(current_idx: int, total_count: int, message: str, item_data: dict | None):
+        if stop_check and stop_check():
+            return False
+
         if total_count > 0:
             fraction = min(max(current_idx / total_count, 0.0), 1.0)
             if progress_bar is not None:
@@ -61,6 +74,7 @@ def make_progress_callback(progress_bar, status_text, table_placeholder, results
             if table_placeholder is not None:
                 df = build_display_dataframe(results_holder)
                 table_placeholder.dataframe(df, use_container_width=True)
+        return True
     return callback
 
 
@@ -110,7 +124,7 @@ def render_sidebar():
         )
 
         st.markdown("---")
-        st.caption("📁 Dữ liệu xuất tự động lưu vào: `output/`")
+        st.caption(f"📁 Dữ liệu xuất tự động lưu vào: `{OUTPUT_DIR}`")
 
         return int(max_reels), delay_range, check_comments, headless
 
@@ -135,6 +149,8 @@ def main():
         st.session_state["excel_bytes"] = None
     if "saved_filename" not in st.session_state:
         st.session_state["saved_filename"] = ""
+    if "stop_crawling" not in st.session_state:
+        st.session_state["stop_crawling"] = False
 
     max_reels, delay_range, check_comments, headless = render_sidebar()
 
@@ -152,7 +168,15 @@ def main():
             placeholder="https://www.facebook.com/username hoặc https://www.facebook.com/profile.php?id=...",
             key="page_url_input"
         )
-        if st.button("🚀 Bắt đầu cào nội dung", key="btn_crawl_page", type="primary"):
+        col_b1, col_b2 = st.columns([3, 1])
+        with col_b1:
+            start_tab1 = st.button("🚀 Bắt đầu cào nội dung", key="btn_crawl_page", type="primary")
+        with col_b2:
+            if st.button("⏹️ Dừng cào", key="btn_stop_page"):
+                st.session_state["stop_crawling"] = True
+                st.toast("⏹️ Đang gửi tín hiệu dừng cào...")
+
+        if start_tab1:
             if not page_url_input.strip():
                 st.warning("⚠️ Vui lòng nhập link Fanpage hoặc Profile Facebook!")
             else:
@@ -173,10 +197,18 @@ def main():
             type=["txt"],
             key="reels_file_upload"
         )
-        if st.button("🚀 Bắt đầu cào nội dung", key="btn_crawl_list", type="primary"):
+        col_b3, col_b4 = st.columns([3, 1])
+        with col_b3:
+            start_tab2 = st.button("🚀 Bắt đầu cào nội dung", key="btn_crawl_list", type="primary")
+        with col_b4:
+            if st.button("⏹️ Dừng cào", key="btn_stop_list"):
+                st.session_state["stop_crawling"] = True
+                st.toast("⏹️ Đang gửi tín hiệu dừng cào...")
+
+        if start_tab2:
             file_text = ""
             if uploaded_txt_file is not None:
-                file_text = uploaded_txt_file.read().decode("utf-8", errors="ignore")
+                file_text = uploaded_txt_file.getvalue().decode("utf-8-sig", errors="ignore")
             parsed_urls = parse_reels_input(reels_text_input, file_text)
             if not parsed_urls:
                 st.warning("⚠️ Vui lòng dán link Reels hoặc tải lên file .txt hợp lệ!")
@@ -192,6 +224,7 @@ def main():
         st.session_state["results"] = []
         st.session_state["excel_bytes"] = None
         st.session_state["saved_filename"] = ""
+        st.session_state["stop_crawling"] = False
 
         with progress_container:
             st.markdown("---")
@@ -205,7 +238,8 @@ def main():
                 progress_bar=progress_bar,
                 status_text=status_text,
                 table_placeholder=table_placeholder,
-                results_holder=live_results
+                results_holder=live_results,
+                stop_check=should_stop_crawl
             )
 
             status_text.info("🚀 Đang khởi động trình duyệt và bắt đầu cào...")
@@ -218,12 +252,19 @@ def main():
                     check_comments=check_comments,
                     delay_range=delay_range,
                     headless=headless,
-                    progress_callback=callback
+                    progress_callback=callback,
+                    stop_check_callback=should_stop_crawl
                 )
+
+                was_stopped = should_stop_crawl()
+                st.session_state["stop_crawling"] = False
 
                 if not results:
                     progress_bar.progress(1.0)
-                    status_text.warning("⚠️ Không tìm thấy hoặc không cào được video Reel nào.")
+                    if was_stopped:
+                        status_text.warning("⏹️ Đã dừng cào theo yêu cầu của người dùng. Chưa có dữ liệu nào được cào.")
+                    else:
+                        status_text.warning("⚠️ Không tìm thấy hoặc không cào được video Reel nào.")
                 else:
                     progress_bar.progress(1.0)
                     saved_path = export_to_excel(results)
@@ -232,10 +273,16 @@ def main():
                     st.session_state["results"] = results
                     st.session_state["excel_bytes"] = excel_bytes
                     st.session_state["saved_filename"] = saved_path.name
-                    status_text.success(
-                        f"🎉 Hoàn thành cào dữ liệu! Đã xử lý {len(results)} Reels. "
-                        f"File Excel đã được lưu tự động tại `output/{saved_path.name}`."
-                    )
+
+                    if was_stopped:
+                        status_text.warning(
+                            f"⏹️ Đã dừng cào theo yêu cầu! Đã lưu {len(results)} Reels đã cào được vào `{OUTPUT_DIR / saved_path.name}`."
+                        )
+                    else:
+                        status_text.success(
+                            f"🎉 Hoàn thành cào dữ liệu! Đã xử lý {len(results)} Reels. "
+                            f"File Excel đã được lưu tự động tại `{OUTPUT_DIR / saved_path.name}`."
+                        )
             except Exception as e:
                 status_text.error(f"❌ Có lỗi xảy ra trong quá trình cào dữ liệu: {e}")
 

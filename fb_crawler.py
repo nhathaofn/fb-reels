@@ -263,7 +263,8 @@ def run_crawler_pipeline(
     check_comments: bool = True,
     delay_range: tuple = (MIN_DELAY, MAX_DELAY),
     headless: bool = True,
-    progress_callback = None
+    progress_callback = None,
+    stop_check_callback = None
 ) -> list[dict]:
     """Hàm pipeline chạy toàn bộ luồng cào dữ liệu Facebook Reels."""
     results = []
@@ -298,8 +299,17 @@ def run_crawler_pipeline(
                 return []
 
             for idx, r_url in enumerate(reel_urls, start=1):
+                if stop_check_callback and stop_check_callback():
+                    logger.info("Nhận được tín hiệu dừng cào từ stop_check_callback.")
+                    if progress_callback:
+                        progress_callback(idx - 1, total, "⏹️ Quá trình cào đã được dừng.", None)
+                    break
+
                 if progress_callback:
-                    progress_callback(idx, total, f"Đang xử lý Reel ({idx}/{total}): {r_url}", None)
+                    cb_status = progress_callback(idx, total, f"Đang xử lý Reel ({idx}/{total}): {r_url}", None)
+                    if cb_status is False:
+                        logger.info("Nhận được tín hiệu dừng cào từ progress_callback.")
+                        break
 
                 try:
                     reel_data = extract_single_reel(page, r_url, check_comments, delay_range)
@@ -336,7 +346,8 @@ def crawl_reels(
     check_comments: bool = True,
     delay_range: tuple = (MIN_DELAY, MAX_DELAY),
     headless: bool = True,
-    progress_callback = None
+    progress_callback = None,
+    stop_check_callback = None
 ) -> list[dict]:
     """Hàm wrapper tiện ích cào reels nhận target là URL fanpage hoặc danh sách URL reels."""
     if isinstance(input_target, list):
@@ -353,5 +364,6 @@ def crawl_reels(
         check_comments=check_comments,
         delay_range=delay_range,
         headless=headless,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        stop_check_callback=stop_check_callback
     )
