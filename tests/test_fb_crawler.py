@@ -76,6 +76,7 @@ def test_has_logged_in_session(tmp_path, monkeypatch):
     import sqlite3
     test_profile = tmp_path / "browser_profile"
     monkeypatch.setattr("fb_crawler.PROFILE_DIR", test_profile)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", test_profile / "profiles")
 
     # Thư mục chưa tồn tại
     assert has_logged_in_session() is False
@@ -499,7 +500,9 @@ def test_parse_cookie_input():
 def test_save_cookies_to_profile(tmp_path, monkeypatch):
     """Kiểm tra lưu cookie vào profile."""
     mock_base = tmp_path / "browser_profile"
+    mock_sub = mock_base / "profiles"
     monkeypatch.setattr("fb_crawler.PROFILE_DIR", mock_base)
+    monkeypatch.setattr("fb_crawler.PROFILES_DIR", mock_sub)
 
     # 1. Cookie không hợp lệ
     success, msg = save_cookies_to_profile("default", "invalid_text")

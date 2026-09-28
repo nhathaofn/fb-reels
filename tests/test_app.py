@@ -193,9 +193,10 @@ def test_make_progress_callback_none_handles_safely():
     assert len(results) == 1
 
 
+@patch("app.save_profile_settings")
 @patch("app.has_logged_in_session")
 @patch("app.st")
-def test_render_sidebar_logged_in(mock_st, mock_has_session):
+def test_render_sidebar_logged_in(mock_st, mock_has_session, mock_save_settings):
     """Kiểm tra render sidebar khi đã có phiên đăng nhập."""
     mock_has_session.return_value = True
     mock_st.selectbox.return_value = "default"
@@ -212,11 +213,13 @@ def test_render_sidebar_logged_in(mock_st, mock_has_session):
     assert delay_range == (2.0, 5.0)
     assert check_comments is True
     assert headless is False
+    mock_save_settings.assert_called_once()
 
 
+@patch("app.save_profile_settings")
 @patch("app.has_logged_in_session")
 @patch("app.st")
-def test_render_sidebar_not_logged_in(mock_st, mock_has_session):
+def test_render_sidebar_not_logged_in(mock_st, mock_has_session, mock_save_settings):
     """Kiểm tra render sidebar khi chưa có phiên đăng nhập."""
     mock_has_session.return_value = False
     mock_st.selectbox.return_value = "default"
@@ -234,10 +237,11 @@ def test_render_sidebar_not_logged_in(mock_st, mock_has_session):
     assert headless is True
 
 
+@patch("app.save_profile_settings")
 @patch("app.launch_login_browser")
 @patch("app.has_logged_in_session")
 @patch("app.st")
-def test_render_sidebar_launch_login(mock_st, mock_has_session, mock_launch):
+def test_render_sidebar_launch_login(mock_st, mock_has_session, mock_launch, mock_save_settings):
     """Kiểm tra nhấn nút mở trình duyệt đăng nhập trong sidebar."""
     mock_has_session.return_value = False
     mock_st.selectbox.return_value = "default"
