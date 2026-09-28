@@ -42,20 +42,18 @@ Công cụ tự động hóa mạnh mẽ giúp cào dữ liệu video **Facebook
 ### Bước 1: Mở Terminal / PowerShell
 Di chuyển vào thư mục chứa mã nguồn của tool:
 ```bash
-cd d:\nhathao\1_code\Tool_\get_content
+cd <thư_mục_chứa_tool>
 ```
 
-### Bước 2: Cài đặt các thư viện phụ thuộc
-Cài đặt toàn bộ các gói cần thiết được chỉ định trong `requirements.txt`:
+### Bước 2: Cài đặt trọn gói bằng 1 dòng lệnh
+Cài đặt toàn bộ các thư viện phụ thuộc và trình duyệt Playwright Chromium chỉ với một câu lệnh:
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt && playwright install chromium
 ```
 
-### Bước 3: Cài đặt trình duyệt Playwright
-Cài đặt trình duyệt Chromium hỗ trợ tự động hóa:
-```bash
-playwright install chromium
-```
+> **Ghi chú**: Bạn cũng có thể cài đặt từng bước riêng biệt nếu muốn:
+> 1. `pip install -r requirements.txt` (cài các thư viện Python)
+> 2. `playwright install chromium` (tải trình duyệt Chromium cho Playwright)
 
 ---
 
@@ -130,19 +128,20 @@ Giao diện chính được chia thành 2 chế độ cào chuyên biệt:
 Sau khi hoàn tất (hoặc khi dừng cào), bảng kết quả hoàn chỉnh sẽ xuất hiện:
 - Bấm nút **"📥 Tải xuống file Excel (.xlsx)"**: Tải về file Excel đã được format đẹp mắt, sẵn sàng để gửi báo cáo hoặc mở bằng Microsoft Excel / Google Sheets.
 - Bấm nút **"📥 Tải xuống file CSV (.csv)"**: Tải file dữ liệu dạng CSV (mã hóa chuẩn `utf-8-sig` không bao giờ bị lỗi font tiếng Việt).
-- File Excel cũng được tự động lưu một bản sao trong thư mục `output/` của dự án với tên file chứa ngày giờ: `output/fb_reels_extracted_YYYYMMDD_HHMMSS.xlsx`.
+- File Excel cũng được tự động lưu một bản sao trong thư mục `output/` của dự án với tên file chứa ngày giờ: `output/reels_content_YYYYMMDD_HHMMSS.xlsx`.
 
-#### Các cột dữ liệu trong file kết quả:
+#### Các cột dữ liệu trong file kết quả (khớp chuẩn 9 cột):
 | Cột | Ý nghĩa |
 | :--- | :--- |
 | **STT** | Số thứ tự tăng dần (1, 2, 3...) |
-| **Reel URL** | Đường link video Facebook Reel gốc |
-| **Caption** | Toàn bộ nội dung văn bản mô tả của video Reel |
-| **Link bài viết (Gốc)** | Đường link website được tìm thấy trong Caption/Bình luận |
-| **Link đích (Resolved)** | Đường link sau khi đã giải mã qua các dịch vụ rút gọn link |
-| **Tiêu đề bài viết** | Tiêu đề của bài báo / bài viết trích xuất từ trang web đích |
-| **Nội dung bài viết** | Toàn bộ nội dung văn bản chi tiết của bài báo / bài viết |
-| **Trạng thái** | Trạng thái xử lý (`Thành công`, `Không tìm thấy link`, `Lỗi tải trang`...) |
+| **Link Reel** | URL video Facebook Reels gốc |
+| **Mô tả Reel** | Toàn bộ caption/mô tả của video Reel |
+| **Vị trí tìm thấy link** | Vị trí phát hiện link bài viết ("Trong mô tả" hoặc "Trong bình luận") |
+| **Link Web** | URL trang web bài viết trích xuất được (đã giải mã link rút gọn) |
+| **Tiêu đề bài viết** | Tiêu đề bóc tách được từ trang web bài viết |
+| **Nội dung bài viết** | Toàn bộ nội dung văn bản bài viết (đã bật ngắt dòng tự động Wrap Text) |
+| **Trạng thái** | Trạng thái xử lý ("Thành công", "Không tìm thấy link web", "Lỗi tải trang web"...) |
+| **Thời gian cào** | Ngày giờ hoàn thành bóc tách video (định dạng `YYYY-MM-DD HH:MM:SS`) |
 
 ---
 
