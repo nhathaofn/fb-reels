@@ -155,10 +155,13 @@ def crawl_reels_from_tab(page, reels_url: str, max_count: int, delay_range: tupl
                 clean_href = href.split("?")[0]
                 if not clean_href.startswith("http"):
                     clean_href = "https://www.facebook.com" + clean_href
-                if "/reel/" in clean_href and clean_href not in collected_urls:
-                    collected_urls.append(clean_href)
-                    if len(collected_urls) >= max_count:
-                        break
+                if "/reel/" in clean_href:
+                    parts = clean_href.rstrip("/").split("/")
+                    reel_id = parts[-1] if parts else ""
+                    if reel_id != "reel" and len(reel_id) >= 5 and clean_href not in collected_urls:
+                        collected_urls.append(clean_href)
+                        if len(collected_urls) >= max_count:
+                            break
 
         try:
             page.evaluate("window.scrollBy(0, 1000)")
