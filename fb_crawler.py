@@ -3,6 +3,7 @@ import logging
 import random
 import re
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -274,23 +275,30 @@ def save_cookies_to_profile(profile_name: str, cookie_input: str) -> tuple[bool,
 
 
 def has_logged_in_session(profile_name: str = "default") -> bool:
-    """Kiểm tra xem thư mục profile chỉ định đã có dữ liệu phiên đăng nhập chưa."""
+    """Kiểm tra xem thư mục profile chỉ định đã thực sự có phiên đăng nhập (chứa cookie c_user) chưa."""
     p_dir = get_profile_dir(profile_name)
     if not p_dir.exists():
         return False
 
     cookies_path = p_dir / "Default" / "Network" / "Cookies"
-    local_storage = p_dir / "Default" / "Local Storage"
+    if not cookies_path.exists():
+        cookies_path = p_dir / "Default" / "Cookies"
+        if not cookies_path.exists():
+            return False
 
-    if cookies_path.exists() or local_storage.exists():
-        return True
-
-    # Kiểm tra xem có file nào khác ngoài .gitkeep và thư mục profiles không
     try:
-        entries = [f for f in p_dir.iterdir() if f.name not in [".gitkeep", "profiles"]]
-        return len(entries) > 0
-    except Exception:
-        return False
+        con = sqlite3.connect(f"file:{cookies_path.as_posix()}?mode=ro", uri=True)
+        cur = con.cursor()
+        cur.execute("SELECT 1 FROM cookies WHERE name = ? LIMIT 1", ("c_user",))
+        has_cuser = cur.fetchone() is not None
+        con.close()
+        return has_cuser
+    except Exception as e:
+        logger.debug(f"Không thể đọc sqlite cookies của profile {profile_name}: {e}")
+        try:
+            return cookies_path.stat().st_size > 50000
+        except Exception:
+            return False
 
 
 def launch_login_browser(profile_name: str = "default", headless: bool = False) -> None:
@@ -375,8 +383,25 @@ def extract_single_reel(page, reel_url: str, check_comments: bool, delay_range: 
     caption_text = ""
     target_url = ""
     found_in = "Không tìm thấy"
+    # 0. Đóng modal nhắc đăng nhập / overlay nếu xuất hiện
+    try:
+        close_btn = page.query_selector('div[aria-label="Đóng"], div[aria-label="Close"]')
+        if close_btn:
+            close_btn.click()
+            time.sleep(0.5)
+    except Exception:
+        pass
 
-    # 1. Trích xuất Caption
+    # 1. Tự động bấm "Xem thêm" / "See more" để mở rộng caption đầy đủ nếu bị cắt ngắn
+    try:
+        see_more = page.query_selector('div[role="button"]:has-text("Xem thêm"), span:has-text("Xem thêm"), div[role="button"]:has-text("See more"), span:has-text("See more")')
+        if see_more:
+            see_more.click()
+            time.sleep(0.5)
+    except Exception:
+        pass
+
+    # 2. Trích xuất Caption
     caption_elements = page.query_selector_all('div[dir="auto"], span[dir="auto"]')
     captions_found = []
     for el in caption_elements:

@@ -73,6 +73,7 @@ def test_extract_urls_from_text():
 
 
 def test_has_logged_in_session(tmp_path, monkeypatch):
+    import sqlite3
     test_profile = tmp_path / "browser_profile"
     monkeypatch.setattr("fb_crawler.PROFILE_DIR", test_profile)
 
@@ -83,11 +84,23 @@ def test_has_logged_in_session(tmp_path, monkeypatch):
     test_profile.mkdir()
     assert has_logged_in_session() is False
 
-    # Có file Cookies
+    # Có file Cookies nhưng không có cookie c_user (khách vãng lai)
     cookies_file = test_profile / "Default" / "Network" / "Cookies"
     cookies_file.parent.mkdir(parents=True)
-    cookies_file.write_text("dummy_cookie")
+    con = sqlite3.connect(cookies_file)
+    con.execute("CREATE TABLE cookies (name TEXT, value TEXT)")
+    con.execute("INSERT INTO cookies VALUES ('datr', '123')")
+    con.commit()
+    con.close()
+    assert has_logged_in_session() is False
+
+    # Thêm cookie c_user (đã đăng nhập thật)
+    con = sqlite3.connect(cookies_file)
+    con.execute("INSERT INTO cookies VALUES ('c_user', '1000123')")
+    con.commit()
+    con.close()
     assert has_logged_in_session() is True
+
 
 
 def test_crawl_reels_from_tab():
