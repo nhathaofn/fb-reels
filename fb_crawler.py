@@ -36,22 +36,23 @@ def normalize_reels_url(input_url: str) -> str:
 
     parsed = urlparse(clean_url)
     path = parsed.path.rstrip("/")
+    path_lower = path.lower()
     query = parse_qs(parsed.query)
 
     # 1. Dạng ID: profile.php?id=...
-    if "profile.php" in path and "id" in query:
+    if "profile.php" in path_lower and "id" in query:
         query["sk"] = ["reels_tab"]
         new_query = urlencode(query, doseq=True)
         return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", new_query, ""))
 
     # 2. Dạng đã có /reels
-    if path.endswith("/reels"):
+    if path_lower.endswith("/reels"):
         return f"{parsed.scheme}://{parsed.netloc}{path}/"
-    if "/reels/" in parsed.path:
+    if "/reels/" in path_lower:
         return clean_url
 
     # 3. Dạng username thông thường (facebook.com/username)
-    if path and not path.endswith("/reels"):
+    if path and not path_lower.endswith("/reels"):
         return f"{parsed.scheme}://{parsed.netloc}{path}/reels/"
 
     return clean_url
@@ -64,6 +65,9 @@ def extract_urls_from_text(text: str) -> list[str]:
     matches = URL_REGEX.findall(text)
     external_urls = []
     for u in matches:
+        u = u.rstrip(")]}>\"'")
+        if not u:
+            continue
         if not u.startswith("http"):
             u = "https://" + u
 
@@ -129,7 +133,7 @@ def launch_login_browser(headless: bool = False) -> None:
 def crawl_reels_from_tab(page, reels_url: str, max_count: int, delay_range: tuple) -> list[str]:
     """Lướt tab Reels của Page để lấy danh sách link video."""
     try:
-        page.goto(reels_url, wait_until="networkidle", timeout=45000)
+        page.goto(reels_url, wait_until="domcontentloaded", timeout=45000)
     except Exception as e:
         logger.warning(f"Lỗi hoặc timeout khi mở tab Reels {reels_url}: {e}")
 
@@ -172,7 +176,7 @@ def crawl_reels_from_tab(page, reels_url: str, max_count: int, delay_range: tupl
 def extract_single_reel(page, reel_url: str, check_comments: bool, delay_range: tuple) -> dict:
     """Truy cập từng Reel, lấy caption, tìm link web và bình luận."""
     try:
-        page.goto(reel_url, wait_until="networkidle", timeout=35000)
+        page.goto(reel_url, wait_until="domcontentloaded", timeout=35000)
     except Exception as e:
         logger.warning(f"Lỗi hoặc timeout khi tải Reel {reel_url}: {e}")
 
@@ -297,7 +301,21 @@ def run_crawler_pipeline(
                 if progress_callback:
                     progress_callback(idx, total, f"Đang xử lý Reel ({idx}/{total}): {r_url}", None)
 
-                reel_data = extract_single_reel(page, r_url, check_comments, delay_range)
+                try:
+                    reel_data = extract_single_reel(page, r_url, check_comments, delay_range)
+                except Exception as e:
+                    logger.error(f"Lỗi khi cào Reel {r_url}: {e}")
+                    reel_data = {
+                        "reel_url": r_url,
+                        "caption": "",
+                        "found_in": "Lỗi",
+                        "target_url": "",
+                        "title": "",
+                        "content": "",
+                        "status": f"Lỗi cào video: {e}",
+                        "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+
                 results.append(reel_data)
 
                 if progress_callback:

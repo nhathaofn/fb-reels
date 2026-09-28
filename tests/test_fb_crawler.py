@@ -41,16 +41,18 @@ def test_normalize_reels_url():
     assert normalize_reels_url("") == ""
     assert normalize_reels_url("   ") == ""
     assert normalize_reels_url("facebook.com/kenh14.vn") == "https://facebook.com/kenh14.vn/reels/"
+    assert normalize_reels_url("https://www.facebook.com/kenh14.vn/REELS") == "https://www.facebook.com/kenh14.vn/REELS/"
+    assert normalize_reels_url("https://www.facebook.com/PROFILE.PHP?id=123") == "https://www.facebook.com/PROFILE.PHP?id=123&sk=reels_tab"
 
 
 def test_extract_urls_from_text():
     text = (
-        "Xem chi tiết bài viết tại đây: https://dantri.com.vn/xa-hoi/tin-123.htm "
-        "hoặc http://bit.ly/abc và xem thêm tại https://facebook.com/reel/999 "
-        "hoặc https://instagram.com/p/123."
+        "Xem chi tiết bài viết tại đây: (https://dantri.com.vn/xa-hoi/tin-123.htm) "
+        "hoặc [http://bit.ly/abc] và xem thêm tại \"https://facebook.com/reel/999\" "
+        "hoặc <https://instagram.com/p/123>."
     )
     urls = extract_urls_from_text(text)
-    # Phải lấy được link ngoài, loại bỏ link facebook và instagram
+    # Phải lấy được link ngoài, không dính dấu ngoặc đóng ), ], >, ", loại bỏ facebook/instagram
     assert "https://dantri.com.vn/xa-hoi/tin-123.htm" in urls
     assert "http://bit.ly/abc" in urls
     assert not any("facebook.com" in u for u in urls)
@@ -99,7 +101,7 @@ def test_crawl_reels_from_tab():
     assert len(urls) == 2
     assert urls[0] == "https://www.facebook.com/reel/100001"
     assert urls[1] == "https://www.facebook.com/reel/100002"
-    mock_page.goto.assert_called_once()
+    mock_page.goto.assert_called_once_with("https://www.facebook.com/kenh14.vn/reels/", wait_until="domcontentloaded", timeout=45000)
 
 
 def test_extract_single_reel_caption_url():
@@ -124,6 +126,7 @@ def test_extract_single_reel_caption_url():
             delay_range=(0.01, 0.02)
         )
 
+        mock_page.goto.assert_called_once_with("https://www.facebook.com/reel/100001", wait_until="domcontentloaded", timeout=35000)
         assert result["reel_url"] == "https://www.facebook.com/reel/100001"
         assert result["found_in"] == "Trong mô tả"
         assert result["target_url"] == "https://vnexpress.net/tin-nong-123.htm"
@@ -277,3 +280,53 @@ def test_run_crawler_pipeline_empty():
 
         assert results == []
         progress_mock.assert_called_with(0, 0, "Không tìm thấy video Reel nào.", None)
+
+
+def test_run_crawler_pipeline_single_reel_exception_isolated():
+    mock_callback = MagicMock()
+
+    with patch("fb_crawler.sync_playwright") as mock_playwright_ctx, \
+         patch("fb_crawler.extract_single_reel") as mock_extract_single:
+
+        mock_playwright = MagicMock()
+        mock_playwright_ctx.return_value.__enter__.return_value = mock_playwright
+        mock_context = MagicMock()
+        mock_playwright.chromium.launch_persistent_context.return_value = mock_context
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+
+        # Reel 1 ném ngoại lệ bất ngờ, Reel 2 thành công
+        mock_extract_single.side_effect = [
+            RuntimeError("Network crashed during reel parsing"),
+            {
+                "reel_url": "https://www.facebook.com/reel/222",
+                "caption": "Mô tả 2",
+                "found_in": "Trong mô tả",
+                "target_url": "https://example.com/2",
+                "title": "Tin 2",
+                "content": "Nội dung 2",
+                "status": "Thành công",
+                "scraped_at": "2026-09-28 09:00:00"
+            }
+        ]
+
+        reels_list = ["https://www.facebook.com/reel/111", "https://www.facebook.com/reel/222"]
+        results = run_crawler_pipeline(
+            input_type="list",
+            target_data=reels_list,
+            max_reels=2,
+            progress_callback=mock_callback
+        )
+
+        assert len(results) == 2
+        # Bản ghi 1 ghi nhận lỗi mà không làm sập pipeline
+        assert results[0]["reel_url"] == "https://www.facebook.com/reel/111"
+        assert results[0]["found_in"] == "Lỗi"
+        assert "Lỗi cào video: Network crashed during reel parsing" in results[0]["status"]
+        # Bản ghi 2 xử lý thành công
+        assert results[1]["reel_url"] == "https://www.facebook.com/reel/222"
+        assert results[1]["title"] == "Tin 2"
+        assert results[1]["status"] == "Thành công"
+        # Callback được gọi đủ 2 lần
+        assert mock_callback.call_count >= 2
+
