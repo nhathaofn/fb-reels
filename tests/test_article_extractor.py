@@ -76,6 +76,21 @@ def test_extract_article_from_html_fallback_tag_title():
     assert "Fallback Tag Title" in result["title"]
 
 
+def test_extract_article_from_html_title_with_nested_tags():
+    sample_html = """
+    <html>
+    <head>
+        <title><span>Tiêu đề</span> có thẻ con</title>
+    </head>
+    <body>
+        <p>Đây là nội dung bài viết với title chứa thẻ span con bên trong.</p>
+    </body>
+    </html>
+    """
+    result = extract_article_from_html(sample_html, "https://example.com/nested-title")
+    assert "Tiêu đề có thẻ con" in result["title"]
+
+
 def test_resolve_target_url_empty():
     assert resolve_target_url("") == ""
 
@@ -108,6 +123,35 @@ def test_resolve_target_url_head_fails_get_succeeds():
 
         resolved = resolve_target_url("https://short.io/link")
         assert resolved == "https://example.com/from-get"
+
+
+def test_resolve_target_url_head_405_status_triggers_get_fallback():
+    with patch("httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+
+        # HEAD returns a 405 response where raise_for_status() raises HTTPStatusError
+        head_resp = MagicMock()
+        head_resp.status_code = 405
+        head_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "405 Method Not Allowed",
+            request=MagicMock(),
+            response=head_resp,
+        )
+        mock_client.head.return_value = head_resp
+
+        # GET succeeds
+        get_resp = MagicMock()
+        get_resp.status_code = 200
+        get_resp.url = "https://example.com/target-from-get-after-405"
+        mock_client.get.return_value = get_resp
+        mock_client.__enter__.return_value = mock_client
+
+        mock_client_cls.return_value = mock_client
+
+        resolved = resolve_target_url("https://example.com/shortlink")
+        assert resolved == "https://example.com/target-from-get-after-405"
+        mock_client.head.assert_called_once_with("https://example.com/shortlink")
+        mock_client.get.assert_called_once_with("https://example.com/shortlink")
 
 
 def test_resolve_target_url_all_fail():

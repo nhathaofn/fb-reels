@@ -15,9 +15,10 @@ def resolve_target_url(url: str, timeout: float = REQUEST_TIMEOUT) -> str:
     try:
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=headers) as client:
             resp = client.head(url)
+            resp.raise_for_status()
             return str(resp.url)
     except Exception:
-        # Fallback thử qua GET nếu server từ chối HEAD
+        # Fallback thử qua GET nếu server từ chối HEAD hoặc trả mã lỗi
         try:
             with httpx.Client(follow_redirects=True, timeout=timeout, headers=headers) as client:
                 resp = client.get(url)
@@ -53,8 +54,8 @@ def extract_article_from_html(html: str, url: str = "") -> dict:
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
             title = og_title["content"].strip()
-        elif soup.title and soup.title.string:
-            title = soup.title.string.strip()
+        elif soup.title and soup.title.get_text(strip=True):
+            title = soup.title.get_text(strip=True)
 
     if not extracted_text:
         return {
