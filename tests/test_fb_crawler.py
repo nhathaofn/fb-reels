@@ -657,4 +657,136 @@ def test_clean_caption_text():
     assert clean_caption_text("Some text\nRate this translation") == "Some text"
 
 
+def test_run_crawler_pipeline_skip_duplicate_and_sequential_numbering(tmp_path):
+    """Kiểm tra:
+    1. Bỏ qua tải lại nếu video Reel đã tồn tại trong folder video/.
+    2. Đánh số thứ tự nối tiếp (sequential numbering) cho video mới và caption mới.
+    """
+    video_dir = tmp_path / "video"
+    caption_dir = tmp_path / "caption"
+    video_dir.mkdir()
+    caption_dir.mkdir()
+
+    # Giả lập đã có video STT 1 của Reel 111 từ đợt trước
+    old_vid = video_dir / "1_111.mp4"
+    old_vid.write_bytes(b"existing video content")
+    (caption_dir / "caption_1.txt").write_text("old caption 1", encoding="utf-8")
+
+    with patch("src.core.fb_crawler.sync_playwright") as mock_pw, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract, \
+         patch("src.core.fb_crawler.download_reel_video") as mock_download:
+
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_pw.return_value.__enter__.return_value.chromium.launch_persistent_context.return_value = mock_context
+
+        # Cào 2 reel: 111 (đã có) và 222 (mới)
+        mock_extract.side_effect = [
+            {
+                "reel_url": "https://www.facebook.com/reel/111",
+                "caption": "Caption 1 updated",
+                "found_in": "Mô tả",
+                "target_url": "",
+                "title": "",
+                "content": "",
+                "status": "Thành công",
+                "scraped_at": "2026-09-29 09:00:00"
+            },
+            {
+                "reel_url": "https://www.facebook.com/reel/222",
+                "caption": "Caption 2 new",
+                "found_in": "Mô tả",
+                "target_url": "",
+                "title": "",
+                "content": "",
+                "status": "Thành công",
+                "scraped_at": "2026-09-29 09:01:00"
+            }
+        ]
+
+        mock_download.return_value = (True, str(video_dir / "2_222.mp4"), "Tải thành công")
+
+        results = run_crawler_pipeline(
+            input_type="list",
+            target_data=[
+                "https://www.facebook.com/reel/111",
+                "https://www.facebook.com/reel/222"
+            ],
+            max_reels=2,
+            download_video=True,
+            video_output_dir=video_dir,
+            caption_output_dir=caption_dir,
+            auto_save_captions=True
+        )
+
+        assert len(results) == 2
+
+        # 1. Reel 111: Đã có sẵn -> Giữ STT 1, video_path trỏ vào old_vid, download_reel_video KHÔNG gọi cho 111
+        assert results[0]["stt"] == 1
+        assert results[0]["video_path"] == str(old_vid)
+
+        # 2. Reel 222: Video mới -> Đánh số tiếp theo là STT 2!
+        assert results[1]["stt"] == 2
+        assert results[1]["video_path"] == str(video_dir / "2_222.mp4")
+
+        # 3. download_reel_video CHỈ được gọi đúng 1 lần cho Reel 222
+        assert mock_download.call_count == 1
+        call_args, call_kwargs = mock_download.call_args
+        assert call_args[0] == "https://www.facebook.com/reel/222"
+        assert call_kwargs["filename_template"] == "2_%(id)s.%(ext)s"
+
+        # 4. Caption mới caption_2.txt được lưu
+        assert (caption_dir / "caption_2.txt").exists()
+        assert (caption_dir / "caption_2.txt").read_text(encoding="utf-8") == "Caption 2 new"
+
+
+def test_crawler_pipeline_triggers_on_item_ready(tmp_path):
+    """Kiểm tra run_crawler_pipeline gọi on_item_ready ngay khi video được tải xong."""
+    from src.core.fb_crawler import run_crawler_pipeline
+
+    ready_items = []
+    def on_ready(item):
+        ready_items.append(item)
+
+    fake_vid = tmp_path / "1_123456789.mp4"
+    fake_vid.write_bytes(b"dummy")
+
+    with patch("src.core.fb_crawler.sync_playwright") as mock_pw, \
+         patch("src.core.fb_crawler.extract_single_reel") as mock_extract, \
+         patch("src.core.fb_crawler.download_reel_video") as mock_dl:
+
+        mock_context = MagicMock()
+        mock_page = MagicMock()
+        mock_context.pages = [mock_page]
+        mock_pw.return_value.__enter__.return_value.chromium.launch_persistent_context.return_value = mock_context
+
+        mock_extract.return_value = {
+            "reel_id": "123456789",
+            "reel_url": "https://www.facebook.com/reel/123456789",
+            "caption": "Reel Caption",
+            "target_url": "",
+            "title": "",
+            "content": "",
+            "status": "Thành công"
+        }
+        mock_dl.return_value = (True, str(fake_vid), "OK")
+
+        results = run_crawler_pipeline(
+            input_type="list",
+            target_data=["https://www.facebook.com/reel/123456789"],
+            max_reels=1,
+            download_video=True,
+            video_output_dir=str(tmp_path),
+            on_item_ready=on_ready
+        )
+
+        assert len(results) == 1
+        assert len(ready_items) == 1
+        assert ready_items[0]["reel_id"] == "123456789"
+        assert ready_items[0]["video_path"] == str(fake_vid)
+
+
+
+
 

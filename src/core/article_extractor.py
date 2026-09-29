@@ -49,6 +49,7 @@ def extract_article_from_html(html: str, url: str = "") -> dict:
         title = metadata.title.strip()
 
     # Fallback tiêu đề qua thẻ <title> hoặc og:title nếu trafilatura chưa lấy được
+    soup = None
     if not title:
         soup = BeautifulSoup(html, "html.parser")
         og_title = soup.find("meta", property="og:title")
@@ -56,6 +57,14 @@ def extract_article_from_html(html: str, url: str = "") -> dict:
             title = og_title["content"].strip()
         elif soup.title and soup.title.get_text(strip=True):
             title = soup.title.get_text(strip=True)
+
+    # Fallback nội dung qua og:description hoặc meta description nếu trafilatura chưa bóc tách được (trang JS/SPA nhẹ)
+    if not extracted_text:
+        if soup is None:
+            soup = BeautifulSoup(html, "html.parser")
+        meta_desc = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "description"})
+        if meta_desc and meta_desc.get("content"):
+            extracted_text = meta_desc["content"].strip()
 
     if not extracted_text:
         return {
@@ -77,7 +86,15 @@ def extract_article(url: str, timeout: float = REQUEST_TIMEOUT) -> dict:
         return {"title": "", "content": "", "status": "Không có link web"}
 
     final_url = resolve_target_url(url, timeout=timeout)
-    headers = {"User-Agent": USER_AGENT}
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1"
+    }
     try:
         with httpx.Client(follow_redirects=True, timeout=timeout, headers=headers) as client:
             resp = client.get(final_url)

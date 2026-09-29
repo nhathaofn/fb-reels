@@ -1,20 +1,26 @@
+import os
+from pathlib import Path
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
+from src.core.capcut_builder import get_capcut_templates, find_capcut_draft_dir
+
 
 class CrawlerView(ctk.CTkFrame):
-    """Khu vực nhập nguồn dữ liệu (Tab Page / Tab Danh sách link Reels) và nút điều khiển."""
+    """Khu vực nhập nguồn dữ liệu (Tab Page / Tab Danh sách link Reels / Tab CapCut Studio) và nút điều khiển."""
 
-    def __init__(self, master, on_start=None, on_stop=None, **kwargs):
+    def __init__(self, master, on_start=None, on_stop=None, on_render=None, on_create_draft=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self.on_start = on_start
         self.on_stop = on_stop
+        self.on_render = on_render
+        self.on_create_draft = on_create_draft
 
         self._build_tabs()
         self._build_action_buttons()
 
     def _build_tabs(self):
-        self.tabview = ctk.CTkTabview(self, height=220)
+        self.tabview = ctk.CTkTabview(self, height=240)
         self.tabview.pack(fill="x", padx=10, pady=(5, 5))
 
         # Tab 1: Fanpage / Profile
@@ -78,6 +84,8 @@ class CrawlerView(ctk.CTkFrame):
             command=lambda: self.txt_reels_list.delete("1.0", "end")
         )
         self.btn_clear_txt.pack(pady=4)
+
+
 
     def _build_action_buttons(self):
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -162,3 +170,32 @@ class CrawlerView(ctk.CTkFrame):
     def set_page_url(self, url: str):
         self.entry_page_url.delete(0, "end")
         self.entry_page_url.insert(0, url)
+
+    def get_render_options(self) -> dict:
+        sidebar = None
+        # Tìm instance SidebarFrame trên giao diện
+        try:
+            root = self.winfo_toplevel()
+            if hasattr(root, "sidebar"):
+                sidebar = root.sidebar
+        except Exception:
+            pass
+
+        s = sidebar.get_settings() if sidebar and hasattr(sidebar, "get_settings") else {}
+        return {
+            "template_name": s.get("render_template_name") or "template",
+            "video_dir": s.get("video_output_dir") or "output/videos",
+            "zoom_ratio": 1.1,
+            "layout_mode": "crop_fill",
+            "whisper_model": s.get("whisper_model") or "large-v3-turbo",
+            "whisper_language": s.get("whisper_language", None),
+            "filter_screams": True,
+            "enable_effects": True,
+            "enable_karaoke": True
+        }
+
+    def set_rendering_state(self, is_rendering: bool):
+        self.set_crawling_state(is_rendering)
+
+    def refresh_templates(self):
+        pass

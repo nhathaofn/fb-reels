@@ -4,7 +4,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
-from src.config import EXCEL_DIR, VIDEOS_DIR, CAPTIONS_DIR, DEFAULT_MAX_REELS, MIN_DELAY, MAX_DELAY
+from src.config import OUTPUT_DIR, EXCEL_DIR, VIDEOS_DIR, CAPTIONS_DIR, DEFAULT_MAX_REELS, MIN_DELAY, MAX_DELAY
 from src.core.fb_crawler import (
     delete_profile,
     has_logged_in_session,
@@ -112,8 +112,8 @@ class SidebarFrame(ctk.CTkScrollableFrame):
         lbl_delay = ctk.CTkLabel(self, text="Delay ngẫu nhiên (giây):", font=ctk.CTkFont(size=12))
         lbl_delay.pack(padx=10, pady=(4, 0), anchor="w")
 
-        self.delay_min_var = ctk.DoubleVar(value=MIN_DELAY)
-        self.delay_max_var = ctk.DoubleVar(value=MAX_DELAY)
+        self.delay_min_var = ctk.StringVar(value=str(MIN_DELAY))
+        self.delay_max_var = ctk.StringVar(value=str(MAX_DELAY))
         delay_row = ctk.CTkFrame(self, fg_color="transparent")
         delay_row.pack(padx=10, pady=(2, 6), fill="x")
         self.entry_delay_min = ctk.CTkEntry(delay_row, textvariable=self.delay_min_var, width=80)
@@ -151,146 +151,139 @@ class SidebarFrame(ctk.CTkScrollableFrame):
         )
         self.chk_auto_save_captions.pack(padx=10, pady=5, anchor="w")
 
+        # Auto Render by Template Checkbox
+        self.auto_render_template_var = ctk.BooleanVar(value=False)
+        self.chk_auto_render = ctk.CTkCheckBox(
+            self,
+            text="⚡ Tự Render theo Template",
+            variable=self.auto_render_template_var,
+            text_color="#10b981",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._on_auto_render_toggled
+        )
+        self.chk_auto_render.pack(padx=10, pady=(6, 2), anchor="w")
+
+        # Template Selection Frame (giao diện chọn mẫu template cho khâu tự động)
+        self.frame_tpl_select = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_tpl_select.pack(padx=10, pady=(2, 6), fill="x")
+
+        lbl_tpl_note = ctk.CTkLabel(
+            self.frame_tpl_select,
+            text="Mẫu CapCut (Sub, Font, Style):",
+            font=ctk.CTkFont(size=11),
+            text_color="#9ca3af"
+        )
+        lbl_tpl_note.pack(anchor="w")
+
+        row_tpl = ctk.CTkFrame(self.frame_tpl_select, fg_color="transparent")
+        row_tpl.pack(fill="x", pady=(1, 2))
+
+        self.template_name_var = ctk.StringVar(value="template-fb")
+        self.opt_template = ctk.CTkOptionMenu(
+            row_tpl,
+            variable=self.template_name_var,
+            values=self._get_template_names(),
+            font=ctk.CTkFont(size=11),
+            command=lambda _: self.save_current_settings()
+        )
+        self.opt_template.pack(side="left", expand=True, fill="x", padx=(0, 4))
+
+        self.btn_browse_tpl = ctk.CTkButton(
+            row_tpl,
+            text="📁",
+            width=34,
+            fg_color="#374151",
+            hover_color="#4b5563",
+            command=self._choose_custom_template
+        )
+        self.btn_browse_tpl.pack(side="right")
+
+        lbl_whisper_note = ctk.CTkLabel(
+            self.frame_tpl_select,
+            text="Model Whisper (Nhận diện giọng nói):",
+            font=ctk.CTkFont(size=11),
+            text_color="#9ca3af"
+        )
+        lbl_whisper_note.pack(anchor="w", pady=(5, 1))
+
+        self.whisper_model_var = ctk.StringVar(value="large-v3-turbo (Nhanh & Chuẩn - Tối ưu GPU)")
+        self.opt_whisper_model = ctk.CTkOptionMenu(
+            self.frame_tpl_select,
+            variable=self.whisper_model_var,
+            values=[
+                "large-v3-turbo (Nhanh & Chuẩn - Tối ưu GPU)",
+                "large-v3 (Mạnh nhất)",
+                "medium",
+                "small",
+                "base"
+            ],
+            font=ctk.CTkFont(size=11),
+            command=lambda _: self.save_current_settings()
+        )
+        self.opt_whisper_model.pack(fill="x", pady=(1, 2))
+
     def _build_folder_shortcuts(self):
         # Divider
         ctk.CTkLabel(self, text="—" * 25, text_color="gray").pack(pady=8)
 
         lbl_folder = ctk.CTkLabel(
-            self, text="📁 Thư mục kết quả", font=ctk.CTkFont(size=15, weight="bold")
+            self, text="📁 Thư mục lưu dự án", font=ctk.CTkFont(size=15, weight="bold")
         )
-        lbl_folder.pack(padx=10, pady=(2, 6), anchor="w")
+        lbl_folder.pack(padx=10, pady=(2, 2), anchor="w")
 
-        # 1. Thư mục lưu Video
-        lbl_v_title = ctk.CTkLabel(self, text="🎬 Thư mục lưu Video (.mp4):", font=ctk.CTkFont(size=12))
-        lbl_v_title.pack(padx=10, pady=(2, 0), anchor="w")
-
-        self.video_dir_var = ctk.StringVar(value=str(VIDEOS_DIR))
-        self.entry_video_dir = ctk.CTkEntry(
-            self, textvariable=self.video_dir_var, font=ctk.CTkFont(size=11)
+        lbl_note = ctk.CTkLabel(
+            self,
+            text="Tự động chia folder theo kênh:\n{stt}_{id_kênh}/ [video, caption, final]",
+            font=ctk.CTkFont(size=11),
+            text_color="#9ca3af",
+            justify="left"
         )
-        self.entry_video_dir.pack(padx=10, pady=(2, 4), fill="x")
-        self.entry_video_dir.bind("<FocusOut>", lambda e: self.save_current_settings())
+        lbl_note.pack(padx=10, pady=(0, 6), anchor="w")
 
-        row_v_btn = ctk.CTkFrame(self, fg_color="transparent")
-        row_v_btn.pack(padx=10, pady=(0, 8), fill="x")
+        self.project_dir_var = ctk.StringVar(value=str(OUTPUT_DIR))
+        # Khởi tạo tương thích ngược cho các biến cũ
+        self.video_dir_var = self.project_dir_var
+        self.excel_dir_var = self.project_dir_var
+        self.caption_dir_var = self.project_dir_var
 
-        self.btn_choose_videos = ctk.CTkButton(
-            row_v_btn,
+        self.entry_project_dir = ctk.CTkEntry(
+            self, textvariable=self.project_dir_var, font=ctk.CTkFont(size=11)
+        )
+        self.entry_project_dir.pack(padx=10, pady=(2, 4), fill="x")
+        self.entry_project_dir.bind("<FocusOut>", lambda e: self.save_current_settings())
+
+        row_p_btn = ctk.CTkFrame(self, fg_color="transparent")
+        row_p_btn.pack(padx=10, pady=(0, 8), fill="x")
+
+        self.btn_choose_project = ctk.CTkButton(
+            row_p_btn,
             text="📂 Chọn...",
             width=70,
             fg_color="#374151",
             hover_color="#4b5563",
-            command=self._choose_videos_folder
+            command=self._choose_project_folder
         )
-        self.btn_choose_videos.pack(side="left", expand=True, fill="x", padx=(0, 2))
+        self.btn_choose_project.pack(side="left", expand=True, fill="x", padx=(0, 2))
 
-        self.btn_open_videos = ctk.CTkButton(
-            row_v_btn,
+        self.btn_open_project = ctk.CTkButton(
+            row_p_btn,
             text="↗️ Mở",
             width=55,
             fg_color="#1971c2",
             hover_color="#1c7ed6",
-            command=self._open_videos_folder
+            command=self._open_project_folder
         )
-        self.btn_open_videos.pack(side="left", expand=True, fill="x", padx=2)
+        self.btn_open_project.pack(side="left", expand=True, fill="x", padx=2)
 
-        self.btn_reset_videos = ctk.CTkButton(
-            row_v_btn,
+        self.btn_reset_project = ctk.CTkButton(
+            row_p_btn,
             text="↺",
             width=30,
             fg_color="#495057",
             hover_color="#6c757d",
-            command=self._reset_videos_folder
+            command=self._reset_project_folder
         )
-        self.btn_reset_videos.pack(side="right", padx=(2, 0))
-
-        # 2. Thư mục lưu Excel
-        lbl_e_title = ctk.CTkLabel(self, text="📊 Thư mục lưu Excel (.xlsx):", font=ctk.CTkFont(size=12))
-        lbl_e_title.pack(padx=10, pady=(2, 0), anchor="w")
-
-        self.excel_dir_var = ctk.StringVar(value=str(EXCEL_DIR))
-        self.entry_excel_dir = ctk.CTkEntry(
-            self, textvariable=self.excel_dir_var, font=ctk.CTkFont(size=11)
-        )
-        self.entry_excel_dir.pack(padx=10, pady=(2, 4), fill="x")
-        self.entry_excel_dir.bind("<FocusOut>", lambda e: self.save_current_settings())
-
-        row_e_btn = ctk.CTkFrame(self, fg_color="transparent")
-        row_e_btn.pack(padx=10, pady=(0, 6), fill="x")
-
-        self.btn_choose_excel = ctk.CTkButton(
-            row_e_btn,
-            text="📂 Chọn...",
-            width=70,
-            fg_color="#374151",
-            hover_color="#4b5563",
-            command=self._choose_excel_folder
-        )
-        self.btn_choose_excel.pack(side="left", expand=True, fill="x", padx=(0, 2))
-
-        self.btn_open_excel = ctk.CTkButton(
-            row_e_btn,
-            text="↗️ Mở",
-            width=55,
-            fg_color="#099268",
-            hover_color="#0ca678",
-            command=self._open_excel_folder
-        )
-        self.btn_open_excel.pack(side="left", expand=True, fill="x", padx=2)
-
-        self.btn_reset_excel = ctk.CTkButton(
-            row_e_btn,
-            text="↺",
-            width=30,
-            fg_color="#495057",
-            hover_color="#6c757d",
-            command=self._reset_excel_folder
-        )
-        self.btn_reset_excel.pack(side="right", padx=(2, 0))
-
-        # 3. Thư mục lưu Caption
-        lbl_c_title = ctk.CTkLabel(self, text="📝 Thư mục lưu Caption (.txt):", font=ctk.CTkFont(size=12))
-        lbl_c_title.pack(padx=10, pady=(2, 0), anchor="w")
-
-        self.caption_dir_var = ctk.StringVar(value=str(CAPTIONS_DIR))
-        self.entry_caption_dir = ctk.CTkEntry(
-            self, textvariable=self.caption_dir_var, font=ctk.CTkFont(size=11)
-        )
-        self.entry_caption_dir.pack(padx=10, pady=(2, 4), fill="x")
-        self.entry_caption_dir.bind("<FocusOut>", lambda e: self.save_current_settings())
-
-        row_c_btn = ctk.CTkFrame(self, fg_color="transparent")
-        row_c_btn.pack(padx=10, pady=(0, 6), fill="x")
-
-        self.btn_choose_caption = ctk.CTkButton(
-            row_c_btn,
-            text="📂 Chọn...",
-            width=70,
-            fg_color="#374151",
-            hover_color="#4b5563",
-            command=self._choose_caption_folder
-        )
-        self.btn_choose_caption.pack(side="left", expand=True, fill="x", padx=(0, 2))
-
-        self.btn_open_caption = ctk.CTkButton(
-            row_c_btn,
-            text="↗️ Mở",
-            width=55,
-            fg_color="#e67700",
-            hover_color="#f59f00",
-            command=self._open_caption_folder
-        )
-        self.btn_open_caption.pack(side="left", expand=True, fill="x", padx=2)
-
-        self.btn_reset_caption = ctk.CTkButton(
-            row_c_btn,
-            text="↺",
-            width=30,
-            fg_color="#495057",
-            hover_color="#6c757d",
-            command=self._reset_caption_folder
-        )
-        self.btn_reset_caption.pack(side="right", padx=(2, 0))
+        self.btn_reset_project.pack(side="right", padx=(2, 0))
 
     def refresh_profiles(self):
         """Cập nhật lại danh sách profile."""
@@ -317,6 +310,32 @@ class SidebarFrame(ctk.CTkScrollableFrame):
         if self.on_profile_change:
             self.on_profile_change(choice)
 
+    def _get_template_names(self) -> list[str]:
+        try:
+            from src.core.capcut_builder import get_capcut_templates
+            tpls = get_capcut_templates(filter_template_keyword=True)
+            names = [t["name"] for t in tpls if t.get("name") and "template" in t["name"].lower()]
+            return names if names else ["(Chưa có template)"]
+        except Exception:
+            return ["(Chưa có template)"]
+
+    def _on_auto_render_toggled(self):
+        if self.auto_render_template_var.get():
+            self.download_video_var.set(True)
+        self.save_current_settings()
+
+    def _choose_custom_template(self):
+        selected = filedialog.askdirectory(title="Chọn thư mục dự án CapCut làm Template")
+        if selected:
+            p = Path(selected)
+            val = str(p.name) if (p / "draft_content.json").exists() else str(p.resolve())
+            cur_vals = list(self.opt_template.cget("values"))
+            if val not in cur_vals:
+                cur_vals.append(val)
+                self.opt_template.configure(values=cur_vals)
+            self.template_name_var.set(val)
+            self.save_current_settings()
+
     def _load_settings_into_ui(self):
         prof = self.profile_var.get()
         s = load_profile_settings(prof)
@@ -330,10 +349,34 @@ class SidebarFrame(ctk.CTkScrollableFrame):
         self.crawl_order_var.set(
             "Cũ nhất trước (Từ video đầu tiên)" if order_val == "oldest" else "Mới nhất trước (Từ video gần đây)"
         )
-        self.video_dir_var.set(s.get("video_output_dir", str(VIDEOS_DIR)))
-        self.excel_dir_var.set(s.get("excel_output_dir", str(EXCEL_DIR)))
-        self.caption_dir_var.set(s.get("caption_output_dir", str(CAPTIONS_DIR)))
+        p_dir = s.get("project_output_dir") or s.get("video_output_dir") or str(OUTPUT_DIR)
+        self.project_dir_var.set(p_dir)
         self.auto_save_captions_var.set(bool(s.get("auto_save_captions", True)))
+
+        self.auto_render_template_var.set(bool(s.get("auto_render_template", False)))
+        cur_tpls = self._get_template_names()
+        tpl_name = s.get("render_template_name")
+        if not tpl_name or (tpl_name not in cur_tpls and cur_tpls and cur_tpls[0] != "(Chưa có template)"):
+            tpl_name = cur_tpls[0] if cur_tpls else "template"
+
+        if tpl_name not in cur_tpls and cur_tpls:
+            cur_tpls.append(tpl_name)
+        self.opt_template.configure(values=cur_tpls)
+        self.template_name_var.set(tpl_name)
+
+        wm = s.get("whisper_model", "large-v3-turbo")
+        for val in [
+            "large-v3-turbo (Nhanh & Chuẩn - Tối ưu GPU)",
+            "large-v3 (Mạnh nhất)",
+            "medium",
+            "small",
+            "base"
+        ]:
+            if val.startswith(wm):
+                self.whisper_model_var.set(val)
+                break
+        else:
+            self.whisper_model_var.set("large-v3-turbo (Nhanh & Chuẩn - Tối ưu GPU)")
 
     def save_current_settings(self):
         """Lưu lại cấu hình hiện tại vào settings.json của profile."""
@@ -343,16 +386,18 @@ class SidebarFrame(ctk.CTkScrollableFrame):
         except Exception:
             max_r = DEFAULT_MAX_REELS
         try:
-            d_min = float(self.delay_min_var.get())
-            d_max = float(self.delay_max_var.get())
+            d_min = float(str(self.delay_min_var.get()).strip())
         except Exception:
-            d_min, d_max = MIN_DELAY, MAX_DELAY
+            d_min = MIN_DELAY
+        try:
+            d_max = float(str(self.delay_max_var.get()).strip())
+        except Exception:
+            d_max = MAX_DELAY
 
         order_choice = "oldest" if "Cũ nhất" in self.crawl_order_var.get() else "newest"
-
-        v_dir = self.video_dir_var.get().strip() or str(VIDEOS_DIR)
-        e_dir = self.excel_dir_var.get().strip() or str(EXCEL_DIR)
-        c_dir = self.caption_dir_var.get().strip() or str(CAPTIONS_DIR)
+        p_dir = self.project_dir_var.get().strip() or str(OUTPUT_DIR)
+        raw_wm = self.whisper_model_var.get() if hasattr(self, "whisper_model_var") else "large-v3-turbo"
+        wm_clean = raw_wm.split(" ")[0].strip()
 
         cfg = {
             "max_reels": max_r,
@@ -362,10 +407,14 @@ class SidebarFrame(ctk.CTkScrollableFrame):
             "headless": bool(self.headless_var.get()),
             "download_video": bool(self.download_video_var.get()),
             "auto_save_captions": bool(self.auto_save_captions_var.get()),
+            "auto_render_template": bool(self.auto_render_template_var.get()),
+            "render_template_name": self.template_name_var.get().strip() or "template",
+            "whisper_model": wm_clean or "large-v3-turbo",
             "crawl_order": order_choice,
-            "video_output_dir": v_dir,
-            "excel_output_dir": e_dir,
-            "caption_output_dir": c_dir,
+            "project_output_dir": p_dir,
+            "video_output_dir": p_dir,
+            "excel_output_dir": p_dir,
+            "caption_output_dir": p_dir,
         }
         save_profile_settings(prof, cfg)
         return cfg
@@ -442,89 +491,68 @@ class SidebarFrame(ctk.CTkScrollableFrame):
             self.after(500, self._update_login_badge)
         threading.Thread(target=run, daemon=True).start()
 
-    def _choose_videos_folder(self):
-        cur = self.video_dir_var.get().strip()
-        initial = cur if cur and os.path.exists(cur) else str(VIDEOS_DIR)
+    def _choose_project_folder(self):
+        cur = self.project_dir_var.get().strip()
+        initial = cur if cur and os.path.exists(cur) else str(OUTPUT_DIR)
         selected = filedialog.askdirectory(
-            title="Chọn thư mục lưu Video Reels (.mp4)",
+            title="Chọn thư mục lưu dự án",
             initialdir=initial
         )
         if selected:
             norm_path = str(Path(selected).resolve())
-            self.video_dir_var.set(norm_path)
+            self.project_dir_var.set(norm_path)
             self.save_current_settings()
 
-    def _reset_videos_folder(self):
-        self.video_dir_var.set(str(VIDEOS_DIR))
+    def _reset_project_folder(self):
+        self.project_dir_var.set(str(OUTPUT_DIR))
         self.save_current_settings()
 
-    def _open_videos_folder(self):
-        cur = self.video_dir_var.get().strip()
-        target = Path(cur) if cur else VIDEOS_DIR
+    def _open_project_folder(self):
+        cur = self.project_dir_var.get().strip()
+        target = Path(cur) if cur else OUTPUT_DIR
         target.mkdir(parents=True, exist_ok=True)
         try:
             os.startfile(str(target))
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể mở thư mục: {e}", parent=self)
 
-    def _choose_excel_folder(self):
-        cur = self.excel_dir_var.get().strip()
-        initial = cur if cur and os.path.exists(cur) else str(EXCEL_DIR)
-        selected = filedialog.askdirectory(
-            title="Chọn thư mục lưu file Excel (.xlsx)",
-            initialdir=initial
-        )
-        if selected:
-            norm_path = str(Path(selected).resolve())
-            self.excel_dir_var.set(norm_path)
-            self.save_current_settings()
+    def get_project_dir(self) -> Path:
+        val = self.project_dir_var.get().strip()
+        return Path(val) if val else OUTPUT_DIR
 
-    def _reset_excel_folder(self):
-        self.excel_dir_var.set(str(EXCEL_DIR))
-        self.save_current_settings()
-
-    def _open_excel_folder(self):
-        cur = self.excel_dir_var.get().strip()
-        target = Path(cur) if cur else EXCEL_DIR
-        target.mkdir(parents=True, exist_ok=True)
-        try:
-            os.startfile(str(target))
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể mở thư mục: {e}", parent=self)
-
-    def _choose_caption_folder(self):
-        cur = self.caption_dir_var.get().strip()
-        initial = cur if cur and os.path.exists(cur) else str(CAPTIONS_DIR)
-        selected = filedialog.askdirectory(
-            title="Chọn thư mục lưu file Caption (.txt)",
-            initialdir=initial
-        )
-        if selected:
-            norm_path = str(Path(selected).resolve())
-            self.caption_dir_var.set(norm_path)
-            self.save_current_settings()
-
-    def _reset_caption_folder(self):
-        self.caption_dir_var.set(str(CAPTIONS_DIR))
-        self.save_current_settings()
-
-    def _open_caption_folder(self):
-        cur = self.caption_dir_var.get().strip()
-        target = Path(cur) if cur else CAPTIONS_DIR
-        target.mkdir(parents=True, exist_ok=True)
-        try:
-            os.startfile(str(target))
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể mở thư mục: {e}", parent=self)
-
+    # Tương thích ngược với các hàm gọi cũ
     def get_video_dir(self) -> Path:
-        val = self.video_dir_var.get().strip()
-        return Path(val) if val else VIDEOS_DIR
+        return self.get_project_dir()
 
     def get_excel_dir(self) -> Path:
-        val = self.excel_dir_var.get().strip()
-        return Path(val) if val else EXCEL_DIR
+        return self.get_project_dir()
 
     def get_caption_dir(self) -> Path:
-        val = self.caption_dir_var.get().strip()
-        return Path(val) if val else CAPTIONS_DIR
+        return self.get_project_dir()
+
+    def _choose_videos_folder(self):
+        self._choose_project_folder()
+
+    def _reset_videos_folder(self):
+        self._reset_project_folder()
+
+    def _open_videos_folder(self):
+        self._open_project_folder()
+
+    def _choose_excel_folder(self):
+        self._choose_project_folder()
+
+    def _reset_excel_folder(self):
+        self._reset_project_folder()
+
+    def _open_excel_folder(self):
+        self._open_project_folder()
+
+    def _choose_caption_folder(self):
+        self._choose_project_folder()
+
+    def _reset_caption_folder(self):
+        self._reset_project_folder()
+
+    def _open_caption_folder(self):
+        self._open_project_folder()

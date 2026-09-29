@@ -7,6 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse, unquote
+from typing import Callable, Optional
 from playwright.sync_api import sync_playwright
 import yt_dlp
 
@@ -16,6 +17,7 @@ from src.config import (
     MIN_DELAY,
     PROFILE_DIR,
     PROFILES_DIR,
+    OUTPUT_DIR,
     VIDEOS_DIR,
     EXCEL_DIR,
     CAPTIONS_DIR,
@@ -33,6 +35,8 @@ from src.utils.url_helper import (
     URL_REGEX,
     extract_urls_from_text,
     normalize_reels_url,
+    extract_reel_id,
+    scan_existing_reels_folder,
 )
 
 # Parse cookie
@@ -179,6 +183,36 @@ def has_logged_in_session(profile_name: str = "default") -> bool:
             return False
 
 
+def launch_browser_context(p, launch_kwargs: dict, preferred_channel: str | None = None):
+    """Khởi chạy Playwright context linh hoạt với cơ chế tự động thử đa trình duyệt:
+    Thử lần lượt: preferred_channel -> msedge (mặc định Windows 10/11) -> chrome -> Chromium.
+    Đảm bảo 100% mở được trình duyệt trên bất kỳ máy tính Windows nào.
+    """
+    channels_to_try = []
+    if preferred_channel:
+        channels_to_try.append(preferred_channel)
+    for c in ["msedge", "chrome", None]:
+        if c not in channels_to_try:
+            channels_to_try.append(c)
+
+    last_error = None
+    for ch in channels_to_try:
+        kwargs = dict(launch_kwargs)
+        if ch:
+            kwargs["channel"] = ch
+        else:
+            kwargs.pop("channel", None)
+        try:
+            context = p.chromium.launch_persistent_context(**kwargs)
+            logger.debug(f"Đã mở browser context thành công với channel={ch}")
+            return context
+        except Exception as e:
+            last_error = e
+            logger.debug(f"Không thể mở browser với channel={ch}: {e}")
+
+    raise RuntimeError(f"Không thể khởi chạy bất kỳ trình duyệt nào (Edge, Chrome, Chromium): {last_error}")
+
+
 def save_cookies_to_profile(profile_name: str, cookie_input: str, channel: str | None = None) -> tuple[bool, str]:
     """Nạp cookies vào profile cụ thể."""
     cookies = parse_cookie_input(cookie_input)
@@ -198,15 +232,8 @@ def save_cookies_to_profile(profile_name: str, cookie_input: str, channel: str |
                 "extra_http_headers": EXTRA_HTTP_HEADERS,
                 "args": ["--disable-blink-features=AutomationControlled"]
             }
-            if use_channel:
-                launch_kwargs["channel"] = use_channel
 
-            try:
-                context = p.chromium.launch_persistent_context(**launch_kwargs)
-            except Exception as e:
-                logger.warning(f"Không thể khởi chạy context với channel={use_channel}: {e}. Fallback Chromium.")
-                launch_kwargs.pop("channel", None)
-                context = p.chromium.launch_persistent_context(**launch_kwargs)
+            context = launch_browser_context(p, launch_kwargs, preferred_channel=use_channel)
 
             context.add_cookies(cookies)
             page = context.pages[0] if context.pages else context.new_page()
@@ -233,6 +260,7 @@ def load_profile_settings(profile_name: str = "default") -> dict:
         "headless": True,
         "download_video": False,
         "last_page_url": "",
+        "project_output_dir": str(OUTPUT_DIR),
         "video_output_dir": str(VIDEOS_DIR),
         "excel_output_dir": str(EXCEL_DIR),
         "caption_output_dir": str(CAPTIONS_DIR),
@@ -246,6 +274,8 @@ def load_profile_settings(profile_name: str = "default") -> dict:
                     defaults.update(data)
         except Exception as e:
             logger.warning(f"Lỗi khi đọc settings của profile {profile_name}: {e}")
+    if not defaults.get("project_output_dir"):
+        defaults["project_output_dir"] = str(OUTPUT_DIR)
     if not defaults.get("video_output_dir"):
         defaults["video_output_dir"] = str(VIDEOS_DIR)
     if not defaults.get("excel_output_dir"):
@@ -306,15 +336,7 @@ def launch_login_browser(profile_name: str = "default", headless: bool = False, 
             "viewport": {"width": 1280, "height": 800},
             "args": ["--disable-blink-features=AutomationControlled"]
         }
-        if use_channel:
-            launch_kwargs["channel"] = use_channel
-
-        try:
-            context = p.chromium.launch_persistent_context(**launch_kwargs)
-        except Exception as e:
-            logger.warning(f"Không thể mở với channel={use_channel}: {e}. Thử với Chromium mặc định.")
-            launch_kwargs.pop("channel", None)
-            context = p.chromium.launch_persistent_context(**launch_kwargs)
+        context = launch_browser_context(p, launch_kwargs, preferred_channel=use_channel)
 
         page = context.pages[0] if context.pages else context.new_page()
         try:
@@ -861,6 +883,7 @@ def run_crawler_pipeline(
     video_output_dir: Path | str | None = None,
     caption_output_dir: Path | str | None = None,
     auto_save_captions: bool = True,
+    on_item_ready: Optional[Callable[[dict], None]] = None,
 ) -> list[dict]:
     """Pipeline chạy toàn bộ luồng cào dữ liệu và tải video Facebook Reels."""
     results = []
@@ -875,27 +898,33 @@ def run_crawler_pipeline(
             "locale": BROWSER_LOCALE,
             "extra_http_headers": EXTRA_HTTP_HEADERS,
             "viewport": {"width": 1280, "height": 800},
-            "args": ["--disable-blink-features=AutomationControlled"]
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+                "--disable-software-rasterizer",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--blink-settings=imagesEnabled=false"
+            ]
         }
-        if use_channel:
-            launch_kwargs["channel"] = use_channel
+        context = launch_browser_context(p, launch_kwargs, preferred_channel=use_channel)
 
-        try:
-            context = p.chromium.launch_persistent_context(**launch_kwargs)
-        except Exception as e:
-            logger.warning(f"Không thể khởi chạy context với channel={use_channel}: {e}. Fallback Chromium.")
-            launch_kwargs.pop("channel", None)
-            context = p.chromium.launch_persistent_context(**launch_kwargs)
-
-        # Chặn video streaming & images ngầm trong lúc cào DOM để tiết kiệm RAM & mạng
+        # Chặn video streaming, font và media nặng ngầm để tiết kiệm RAM & băng thông mạng
+        # LƯU Ý: Không dùng route("**/*") với route.continue_() vì khi trang chuyển hướng hoặc đóng tab,
+        # Chromium hủy in-flight requests khiến Node.js driver crash với lỗi EPIPE: broken pipe
         page = context.pages[0] if context.pages else context.new_page()
         try:
-            def route_filter(route):
-                if route.request.resource_type in ["media", "image", "font"]:
+            def abort_heavy_media(route):
+                try:
                     route.abort()
-                else:
-                    route.continue_()
-            page.route("**/*", route_filter)
+                except Exception:
+                    pass
+
+            heavy_media_regex = re.compile(
+                r"(\.mp4|\.m4s|\.webm|\.mp3|\.wav|\.ogg|\.woff2?|\.ttf|\.otf|video\.xx\.fbcdn\.net|cdninstagram\.com/.*\.mp4)",
+                re.IGNORECASE
+            )
+            page.route(heavy_media_regex, abort_heavy_media)
         except Exception as e:
             logger.debug(f"Không thể đặt route_filter: {e}")
 
@@ -933,6 +962,13 @@ def run_crawler_pipeline(
                     progress_callback(0, 0, "Không tìm thấy video Reel nào.", None)
                 return []
 
+            # Quét các video/caption đã có sẵn trong folder để đánh số tiếp và kiểm tra trùng lặp
+            max_stt, existing_reels = scan_existing_reels_folder(
+                video_output_dir,
+                caption_output_dir
+            )
+            current_stt = max_stt
+
             for idx, r_url in enumerate(reel_urls, start=1):
                 if stop_check_callback and stop_check_callback():
                     logger.info("Nhận được tín hiệu dừng cào từ stop_check_callback.")
@@ -940,8 +976,22 @@ def run_crawler_pipeline(
                         progress_callback(idx - 1, total, "⏹️ Quá trình cào đã được dừng.", None)
                     break
 
+                # Trích xuất reel_id để kiểm tra trùng lặp
+                r_id = extract_reel_id(r_url)
+                already_downloaded = bool(r_id and (r_id in existing_reels))
+
+                # Xác định STT: nếu video đã tải từ trước thì giữ STT cũ, nếu chưa có thì đánh số tiếp theo
+                if already_downloaded and existing_reels[r_id].get("stt"):
+                    assigned_stt = existing_reels[r_id]["stt"]
+                else:
+                    current_stt += 1
+                    assigned_stt = current_stt
+
                 if progress_callback:
-                    cb_status = progress_callback(idx, total, f"Đang xử lý Reel ({idx}/{total}): {r_url}", None)
+                    skip_tag = " [Đã có video]" if already_downloaded else ""
+                    cb_status = progress_callback(
+                        idx, total, f"Đang xử lý Reel ({idx}/{total}) #{assigned_stt}{skip_tag}: {r_url}", None
+                    )
                     if cb_status is False:
                         logger.info("Nhận được tín hiệu dừng cào từ progress_callback.")
                         break
@@ -962,48 +1012,77 @@ def run_crawler_pipeline(
                         "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S")
                     }
 
-                # Gán số thứ tự trong file excel
-                reel_data["stt"] = idx
+                # Gán số thứ tự tiếp nối vào kết quả
+                reel_data["stt"] = assigned_stt
 
-                # Tự động xuất file caption_{idx}.txt ngay khi cào xong link này
+                # Tự động xuất file caption_{assigned_stt}.txt
                 if auto_save_captions:
                     target_cap_dir = Path(caption_output_dir) if caption_output_dir else CAPTIONS_DIR
                     try:
                         target_cap_dir.mkdir(parents=True, exist_ok=True)
-                        txt_path = target_cap_dir / f"caption_{idx}.txt"
+                        txt_path = target_cap_dir / f"caption_{assigned_stt}.txt"
                         with open(txt_path, "w", encoding="utf-8") as f:
                             f.write(reel_data.get("caption", "") or "")
                         reel_data["caption_path"] = str(txt_path)
                     except Exception as e:
-                        logger.warning(f"Không thể lưu file caption {idx}: {e}")
+                        logger.warning(f"Không thể lưu file caption {assigned_stt}: {e}")
 
-                # Tải video Reels nếu được kích hoạt với quy tắc {STT}_id.mp4
+                # Tải video Reels: Nếu đã có thì BỎ QUA tải lại (Skip Duplicate)
                 if download_video:
-                    if progress_callback:
-                        progress_callback(idx, total, f"Đang tải video Reel ({idx}/{total})...", None)
-                    try:
-                        cookies = context.cookies()
-                    except Exception:
-                        cookies = None
-                    target_vid_dir = Path(video_output_dir) if video_output_dir else VIDEOS_DIR
-                    dl_ok, vid_file, dl_msg = download_reel_video(
-                        r_url,
-                        target_vid_dir,
-                        cookies,
-                        filename_template=f"{idx}_%(id)s.%(ext)s"
-                    )
-                    if dl_ok:
-                        reel_data["video_path"] = vid_file
+                    if already_downloaded:
+                        existing_file = existing_reels[r_id]["path"]
+                        reel_data["video_path"] = str(existing_file)
+                        msg_skip = f"⏭️ Bỏ qua tải: Reel {r_id} đã có sẵn ({existing_file.name})"
+                        logger.info(msg_skip)
+                        if progress_callback:
+                            progress_callback(idx, total, msg_skip, None)
                     else:
-                        logger.warning(f"Không thể tải video {r_url}: {dl_msg}")
+                        if progress_callback:
+                            progress_callback(idx, total, f"Đang tải video Reel ({idx}/{total}) -> #{assigned_stt}...", None)
+                        try:
+                            cookies = context.cookies()
+                        except Exception:
+                            cookies = None
+                        target_vid_dir = Path(video_output_dir) if video_output_dir else VIDEOS_DIR
+                        dl_ok, vid_file, dl_msg = download_reel_video(
+                            r_url,
+                            target_vid_dir,
+                            cookies,
+                            filename_template=f"{assigned_stt}_%(id)s.%(ext)s"
+                        )
+                        if dl_ok:
+                            reel_data["video_path"] = vid_file
+                            existing_reels[r_id] = {
+                                "stt": assigned_stt,
+                                "path": Path(vid_file),
+                                "name": Path(vid_file).name
+                            }
+                        else:
+                            logger.warning(f"Không thể tải video {r_url}: {dl_msg}")
 
                 results.append(reel_data)
 
+                # Báo cho Consumer Queue xử lý render song song ngay lập tức
+                if on_item_ready and reel_data.get("video_path"):
+                    try:
+                        on_item_ready(reel_data)
+                    except Exception as q_err:
+                        logger.warning(f"Lỗi khi gửi reel_data vào on_item_ready callback: {q_err}")
+
                 if progress_callback:
-                    progress_callback(idx, total, f"Đã hoàn thành Reel {idx}/{total}", reel_data)
+                    progress_callback(idx, total, f"Đã hoàn thành Reel {idx}/{total} (STT #{assigned_stt})", reel_data)
 
         finally:
             try:
+                for p_item in list(context.pages):
+                    try:
+                        p_item.unroute_all()
+                    except Exception:
+                        pass
+                    try:
+                        p_item.close()
+                    except Exception:
+                        pass
                 context.close()
             except Exception:
                 pass

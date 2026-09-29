@@ -273,15 +273,22 @@ class ResultTable(ctk.CTkFrame):
             self.lbl_status.configure(text=message)
 
     def add_or_update_record(self, record: dict):
-        """Thêm một bản ghi mới cào được vào bảng."""
-        self.records.append(record)
-        stt = len(self.records)
+        """Thêm bản ghi mới hoặc cập nhật tại chỗ nếu bản ghi (cùng STT hoặc reel_url) đã tồn tại."""
+        stt = record.get("stt")
+        reel_url = record.get("reel_url", "")
+
+        # Tìm xem bản ghi đã có sẵn trong danh sách chưa
+        existing_idx = None
+        for i, r in enumerate(self.records):
+            if (stt is not None and r.get("stt") == stt) or (reel_url and r.get("reel_url") == reel_url):
+                existing_idx = i
+                break
 
         art_content = record.get("content", "") or record.get("title", "")
         content_preview = (art_content or "").replace("\n", " ")[:100]
 
         vals = (
-            stt,
+            record.get("stt", (existing_idx + 1 if existing_idx is not None else len(self.records) + 1)),
             record.get("reel_url", ""),
             (record.get("caption", "") or "").replace("\n", " ")[:80],
             record.get("found_in", ""),
@@ -290,7 +297,16 @@ class ResultTable(ctk.CTkFrame):
             record.get("video_path", ""),
             record.get("status", "")
         )
-        self.tree.insert("", "end", values=vals)
+
+        tree_items = self.tree.get_children()
+        if existing_idx is not None and existing_idx < len(tree_items):
+            # Cập nhật tại chỗ
+            self.records[existing_idx].update(record)
+            self.tree.item(tree_items[existing_idx], values=vals)
+        else:
+            # Thêm mới
+            self.records.append(record)
+            self.tree.insert("", "end", values=vals)
 
         # Cập nhật thống kê
         total = len(self.records)
